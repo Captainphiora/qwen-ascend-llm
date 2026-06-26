@@ -30,6 +30,9 @@ docker run -d \
 		-v /var/slogd:/var/slogd:ro \
 		-v /var/dmp_daemon:/var/dmp_daemon:ro \
 		-v /etc/slog.conf:/etc/slog.conf:ro \
+		-v /usr/lib64/libunified_timer.so:/usr/lib64/libunified_timer.so:ro \
+		-v /home/chenxinji/models/Qwen2.5-0.5B-Instruct:/home/AscendWork/qwen_ascend_llm/download/Qwen2-1.5B-Instruct \
 		--name qwen_ascend_llm \
 		qwen_ascend_llm \
-		bash -c "/home/AscendWork/run.sh && python3 api.py"
+		bash -c "/home/AscendWork/run.sh && tail -f /dev/null"
+		#  && python3 api.py"

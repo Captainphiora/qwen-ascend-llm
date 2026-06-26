@@ -13,7 +13,9 @@ def parser_args():
         '--hf_model_dir',
         type=str,
         help="model and tokenizer path, only support huggingface model",
-        default=os.path.join(project_dir, "download", "Qwen2-1.5B-Instruct")
+        # default=os.path.join(project_dir, "download", "Qwen2-1.5B-Instruct")
+        # default=os.path.join(project_dir, "download", "Qwen2-1.5B-Instruct")
+        default="/home/chenxinji/models/Qwen2.5-0.5B-Instruct"
     )
     parser.add_argument(
         "--session_type",
@@ -41,7 +43,7 @@ def parser_args():
         type=str,
         help="support cpu, cuda, npu, only activate when sesstion_type is pytorch",
         choices=["cpu", "cuda", "npu"],
-        default="cpu",
+        default="npu",
     )
     parser.add_argument(
         "--cpu_thread",
