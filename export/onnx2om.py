@@ -94,7 +94,20 @@ def get_soc_version():
     ascend_home_dir = os.environ.get("ASCEND_HOME_PATH")
     assert ascend_home_dir is not None, \
         print("ASCEND_HOME_PATH is None, you need run `source /usr/local/Ascend/ascend-toolkit/set_env.sh`")
-    with open(f"{ascend_home_dir}/compiler/data/platform_config/{soc_full_name}.ini", "r") as f:
+    platform_config_candidates = [
+        f"{ascend_home_dir}/compiler/data/platform_config/{soc_full_name}.ini",
+        f"{ascend_home_dir}/aarch64-linux/data/platform_config/{soc_full_name}.ini",
+        f"{ascend_home_dir}/x86_64-linux/data/platform_config/{soc_full_name}.ini",
+    ]
+    platform_config_path = None
+    for candidate in platform_config_candidates:
+        if os.path.isfile(candidate):
+            platform_config_path = candidate
+            break
+    if platform_config_path is None:
+        raise FileNotFoundError(
+            f"Cannot find platform config for {soc_full_name}, searched: {platform_config_candidates}")
+    with open(platform_config_path, "r") as f:
         for line in f:
             if find_str in line:
                 start_index = line.find(find_str)

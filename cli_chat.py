@@ -7,20 +7,38 @@ from utils.inference import Inference
 import os
 
 project_dir = os.path.dirname(os.path.abspath(__file__))
+SESSION_TYPE = "acl"
+MODEL_NAME = "DeepSeek-R1-Distill-Qwen-1.5B"
+HF_MODEL_DIR = f"/mnt/host-model/cxj/models/{MODEL_NAME}"
+MAX_INPUT_LENGTH = 1024
+MAX_OUTPUT_LENGTH = 1024
+KV_CACHE_LENGTH = 1024
+MAX_PREFILL_LENGTH = 1
+OM_MODEL_PATH = f"./output/model_910_uv/{MODEL_NAME}_{KV_CACHE_LENGTH}_{MAX_PREFILL_LENGTH}.om"
+CPU_THREAD = 8
+
+# 原本未指定的其他参数，保留默认值
+DTYPE = "float32"
+TORCH_DTYPE = "float32"
+DEVICE_STR = "npu"
+MAX_BATCH = 1
+ONNX_MODEL_PATH = os.path.join(project_dir, "output", "onnx", "qwen2_1.5b_chat.onnx")
+
+
 def parser_args():
     parser = argparse.ArgumentParser()
+    
+    # 将 default 赋值为上方的全局变量
     parser.add_argument(
         '--hf_model_dir',
         type=str,
         help="model and tokenizer path, only support huggingface model",
-        # default=os.path.join(project_dir, "download", "Qwen2-1.5B-Instruct")
-        # default=os.path.join(project_dir, "download", "Qwen2-1.5B-Instruct")
-        default="/home/chenxinji/models/Qwen2.5-0.5B-Instruct"
+        default=HF_MODEL_DIR
     )
     parser.add_argument(
         "--session_type",
         type=str,
-        default="pytorch",
+        default=SESSION_TYPE,
         help="acl or onnx",
         choices=["acl", "onnx", "pytorch"],
     )
@@ -29,66 +47,66 @@ def parser_args():
         type=str,
         help="support float16/float32, if use CPU, only support fp32",
         choices=["float16", "float32"],
-        default="float32",
+        default=DTYPE,
     )
     parser.add_argument(
         "--torch_dtype",
         type=str,
         help="support float16/float32, if use CPU, only support fp32",
         choices=["float16", "float32"],
-        default="float32",
+        default=TORCH_DTYPE,
     )
     parser.add_argument(
         "--device_str",
         type=str,
         help="support cpu, cuda, npu, only activate when sesstion_type is pytorch",
         choices=["cpu", "cuda", "npu"],
-        default="npu",
+        default=DEVICE_STR,
     )
     parser.add_argument(
         "--cpu_thread",
         type=int,
         help="num of cpu thread when run onnx sesstion",
-        default=4,
+        default=CPU_THREAD,
     )
     parser.add_argument(
         '--onnx_model_path',
         type=str,
         help="onnx_model_path",
-        default=os.path.join(project_dir, "output", "onnx", "qwen2_1.5b_chat.onnx")
+        default=ONNX_MODEL_PATH
     )
     parser.add_argument(
         "--om_model_path",
         help="mindspore model path",
         type=str,
-        default= os.path.join(project_dir, "output", "model", "qwen2_1.5b_chat.om")
+        default=OM_MODEL_PATH
     )
     parser.add_argument(
         "--max_batch",
         help="max batch",
         type=int,
-        default=1,
+        default=MAX_BATCH,
     )
     parser.add_argument(
         "--max_input_length",
         help="max input length",
         type=int,
-        default=1024,
+        default=MAX_INPUT_LENGTH,
     )
     parser.add_argument(
         "--max_prefill_length",
         help="max prefill length in first inference. "
-            "Attention max_prefill_length + max_output_length <= kv_cache_length. "
-            "the number must by 2^xx, like 1, 2, 4, 8, 16, 32, 64, 128, 256... "
-            "Note! The higher this number, the longer it will take to compile.",
+             "Attention max_prefill_length + max_output_length <= kv_cache_length. "
+             "the number must by 2^xx, like 1, 2, 4, 8, 16, 32, 64, 128, 256... "
+             "Note! The higher this number, the longer it will take to compile.",
         type=int,
-        default=4,
+        default=MAX_PREFILL_LENGTH,
     )
     parser.add_argument(
         "--max_output_length",
         help="max output length (contain input + new token)",
         type=int,
-        default=2048,
+        default=MAX_OUTPUT_LENGTH,
     )
     return parser.parse_args()
 

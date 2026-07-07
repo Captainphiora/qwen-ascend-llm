@@ -4,7 +4,7 @@
 # DTYPE=float32
 DEVICE_STR=npu
 DTYPE=float16
-KV_CACHE_LENGTH=2048
+KV_CACHE_LENGTH=1024
 
 # MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"

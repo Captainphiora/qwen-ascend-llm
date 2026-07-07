@@ -1,0 +1,61 @@
+# bashrc_cann900 - 专用于 CANN 9.0.0 的 bashrc 配置
+# 使用方式: source bashrc_cann900
+
+# .bashrc
+
+# User specific aliases and functions
+alias rm='rm -i'
+alias cp='cp -i'
+alias mv='mv -i'
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+    . /etc/bashrc
+fi
+
+# ==========================================
+# 1. Ascend NPU 驱动 (版本: 25.5.2)
+# ==========================================
+export LD_LIBRARY_PATH=/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+source /usr/local/Ascend/driver/bin/setenv.bash
+
+# ==========================================
+# 2. CANN 9.0.0 Toolkit (完整安装，含 910 ops)
+# ==========================================
+source /usr/local/Ascend/cann-9.0.0/cann/set_env.sh
+
+
+
+# ==========================================
+# 3. NNAL / ATB 加速库 (8.5.0)
+# ==========================================
+source /usr/local/Ascend/nnal/atb/set_env.sh
+
+# ==========================================
+# 4. 镜像源加速
+# ==========================================
+export UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple/"
+export HF_ENDPOINT=https://hf-mirror.com
+
+# ==========================================
+# 5. 用户 PATH
+# ==========================================
+export PATH="/mnt/host-model/cxj/.local/bin:$PATH"
+
+# ==========================================
+# 6. Conda
+# ==========================================
+# >>> conda initialize >>>
+# !! Contents within this block are managed by 'conda init' !!
+__conda_setup="$('/root/miniconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    eval "$__conda_setup"
+else
+    if [ -f "/root/miniconda3/etc/profile.d/conda.sh" ]; then
+        . "/root/miniconda3/etc/profile.d/conda.sh"
+    else
+        export PATH="/root/miniconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+# <<< conda initialize <<<
