@@ -218,11 +218,13 @@ class ACLModel:
         # 方法3：将模型加载到device内存中 
         # 先获取模型大小
         model_buffer_size = os.path.getsize(model_path)
-        # 分配模型buffer到device内存中
-        model_buffer, ret = acl.rt.malloc(model_buffer_size, ACL_MEM_MALLOC_HUGE_FIRST)
+        # 分配模型buffer到host内存中
+        # 注意：aclmdlLoadFromMem 要求模型数据位于host内存，若传入device内存指针
+        # 会在部分CANN/驱动版本上直接段错误(SIGSEGV)。
+        model_buffer, ret = acl.rt.malloc_host(model_buffer_size)
         p_model_buffer = model_buffer
-        check_ret("alloc model buffer",ret)
-        # 分块读取模型文件，然后将其拷贝到device model中
+        check_ret("alloc model host buffer",ret)
+        # 分块读取模型文件，然后将其拷贝到host model buffer中
         # 块大小（例如 50MB）
         chunk_size = 50 * 1024 * 1024
         have_load_size = 0
@@ -234,18 +236,8 @@ class ACLModel:
                 # 如果读取的数据为空，说明已经读取完毕
                 if not chunk:
                     break
-                # 获取这块数据的内存地址
-                writable_buffer = ctypes.create_string_buffer(chunk)
-                chunk_address = ctypes.addressof(writable_buffer)
-                ret = acl.rt.memcpy(
-                    p_model_buffer,
-                    model_buffer_size - have_load_size,
-                    chunk_address,
-                    chunk_bytes,
-                    ACL_MEMCPY_HOST_TO_DEVICE
-                )
-                del writable_buffer
-                check_ret("memcpy input", ret)
+                # 将这块数据拷贝到host buffer的对应偏移处
+                ctypes.memmove(p_model_buffer, chunk, chunk_bytes)
                 progress = have_load_size * 100 / model_buffer_size
                 print(f"\r[INFO] load model buffer {progress:.2f}%", end="")
                 have_load_size += chunk_bytes
@@ -258,8 +250,8 @@ class ACLModel:
         check_ret("load model",ret)
         et = time.time()
         # 模型加载完后，model_buffer实测可以清理掉了，节省大量空间
-        ret = acl.rt.free(model_buffer)
-        check_ret(f"free model buffer device memory", ret)
+        ret = acl.rt.free_host(model_buffer)
+        check_ret(f"free model buffer host memory", ret)
         print("[INFO] load model duration: ", et - st)
         print("[INFO] get model desc")
         self.model_desc = acl.mdl.create_desc()
