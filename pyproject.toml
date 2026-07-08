@@ -14,6 +14,7 @@ dependencies = [
     "numpy<2.0.0",
     "onnx==1.16.1",
     "onnxruntime==1.18.1",
+    "onnxruntime-cann>=1.23.2",
     "openai>=2.44.0",
     "pathlib2>=2.3.7.post1",
     "protobuf>=7.35.1",

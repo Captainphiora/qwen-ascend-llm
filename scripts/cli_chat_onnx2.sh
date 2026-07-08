@@ -1,8 +1,6 @@
-source ~/.bashrc_uv_cann82 
+# source ~/.bashrc_uv_cann82 
 
 SESSION_TYPE="onnx"
-
-
 # DEVICE_STR=cpu
 DEVICE_STR=npu
 # KV_CACHE_LENGTH=2048
@@ -24,7 +22,9 @@ MAX_OUTPUT_LENGTH=${KV_CACHE_LENGTH}
 # ONNX_MODEL_PATH="./output/onnx_qwen2.5_2048_npu/${MODEL_NAME}_${MAX_OUTPUT_LENGTH}.onnx"
 # ONNX_MODEL_PATH="./output/onnx2_qwen2.5_2048_cpu/${MODEL_NAME}_${MAX_OUTPUT_LENGTH}.onnx"
 # ONNX_MODEL_PATH="./output/onnx2_ds_qwen_1024_npu/${MODEL_NAME}_${MAX_OUTPUT_LENGTH}.onnx"
-ONNX_MODEL_PATH="./output/onnx2/${MODEL_NAME}_${MAX_OUTPUT_LENGTH}.onnx"
+# ONNX_MODEL_PATH="./output/onnx2/${MODEL_NAME}_${MAX_OUTPUT_LENGTH}.onnx"
+# ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_qwen2.5_2048_npu/Qwen2.5-1.5B-Instruct_2048.onnx"
+ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_ds_qwen_2048_npu/DeepSeek-R1-Distill-Qwen-1.5B_2048.onnx"
 
 uv run ./cli_chat.py \
   --session_type=$SESSION_TYPE \

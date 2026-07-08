@@ -35,7 +35,7 @@ source /usr/local/Ascend/nnal/atb/set_env.sh
 # 4. 镜像源加速
 # ==========================================
 export UV_INDEX_URL="https://mirrors.aliyun.com/pypi/simple/"
-export HF_ENDPOINT=https://hf-mirror.com
+export HF_ENDPOINT="https://hf-mirror.com"
 
 # ==========================================
 # 5. 用户 PATH

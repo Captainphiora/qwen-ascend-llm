@@ -937,6 +937,52 @@ wheels = [
 ]
 
 [[package]]
+name = "onnxruntime-cann"
+version = "1.23.2"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+resolution-markers = [
+    "python_full_version < '3.11'",
+]
+dependencies = [
+    { name = "coloredlogs", marker = "python_full_version < '3.11'" },
+    { name = "flatbuffers", marker = "python_full_version < '3.11'" },
+    { name = "numpy", marker = "python_full_version < '3.11'" },
+    { name = "packaging", marker = "python_full_version < '3.11'" },
+    { name = "protobuf", marker = "python_full_version < '3.11'" },
+    { name = "sympy", marker = "python_full_version < '3.11'" },
+]
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/75/17/c06992c6f96af30d9016c46b1a16674b451a9d483e73d14e4bde0beeeb02/onnxruntime_cann-1.23.2-cp310-cp310-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:c8f5c9311239519841b434a2057b2194ec5c72cd5e1b73807a604e70abe9ad4d" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/1e/c1/19fde199b971612afcfb72ef89eab207e19f5bbdac23d508c56df9631007/onnxruntime_cann-1.23.2-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7078f635f306cd603eeadfbca920e5c26d1b46135712c45027ac9b43dbf33a26" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/ff/a4/d83cf81ecc4993a8894c777e44187b6c3464a9714e0273938de5f23093b8/onnxruntime_cann-1.23.2-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a1b497c92b38e76e2174bcdbf1efda00d6bdb54ef8307f561e2b3b87df16a2f0" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/9b/88/0974be17713748d4912165460ebb2c269bd809bdc6bc9065d45fadd3d26c/onnxruntime_cann-1.23.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f934337533d6db979d65f05cefef795a4537c394ac111060a25116f1713f1426" },
+]
+
+[[package]]
+name = "onnxruntime-cann"
+version = "1.24.4"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+    "python_full_version == '3.11.*'",
+]
+dependencies = [
+    { name = "flatbuffers", marker = "python_full_version >= '3.11'" },
+    { name = "numpy", marker = "python_full_version >= '3.11'" },
+    { name = "packaging", marker = "python_full_version >= '3.11'" },
+    { name = "protobuf", marker = "python_full_version >= '3.11'" },
+    { name = "sympy", marker = "python_full_version >= '3.11'" },
+]
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/e4/d7/58aed26c654925c4d77112cc54333621f0c94ee32615e3098a9a722d0e71/onnxruntime_cann-1.24.4-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:acb52f29066fab2d073161b984fe48eadeaac6b2bbfd0735ab9dae579ec8b21a" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/c4/1f/438e3a55cf60198abd9a1d0d091552401ed36c383969fc70881e2071814a/onnxruntime_cann-1.24.4-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6813780ee96892f5c1bd3e05390f821016eb73e599264bd69807a83010a7abbe" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/58/ff/c558666e11e8e6549ce44138fcf483a8678664610e58256a27fefe061818/onnxruntime_cann-1.24.4-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ce65253213f604b6f8bdf745ec86be7f284151d0bb4e4db2b5a63ef201a1c539" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/47/7e/fb286f7b9e0d8b22b0dcb7d75ffbbf8423c5dcf02c7070776b429046249d/onnxruntime_cann-1.24.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7ca3bde2965a9c6065f83bdfe7b2c22e14de9fbc3ba24d15b19849b76aa017b0" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/e7/04/d14e048b624e306a027eaa84b2778ef10b2c3406a2c2721b36c5784cdfbc/onnxruntime_cann-1.24.4-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0cab040de19ae991f04cc4f6738d66dcd84c479eaa6bec2b1d58e94e7b2c06ba" },
+    { url = "https://mirrors.aliyun.com/pypi/packages/71/47/a370897402ccacc76d954bea8ae3a1c0fa1a38bd9d89226de1e5d3e779c9/onnxruntime_cann-1.24.4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6bfd5e9c625e54cab21d60ef8b0553987bfa7c19ddc33d7932c36961325a9922" },
+]
+
+[[package]]
 name = "openai"
 version = "2.44.0"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -1183,6 +1229,8 @@ dependencies = [
     { name = "numpy" },
     { name = "onnx" },
     { name = "onnxruntime" },
+    { name = "onnxruntime-cann", version = "1.23.2", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime-cann", version = "1.24.4", source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }, marker = "python_full_version >= '3.11'" },
     { name = "openai" },
     { name = "pathlib2" },
     { name = "protobuf" },
@@ -1212,6 +1260,7 @@ requires-dist = [
     { name = "numpy", specifier = "<2.0.0" },
     { name = "onnx", specifier = "==1.16.1" },
     { name = "onnxruntime", specifier = "==1.18.1" },
+    { name = "onnxruntime-cann", specifier = ">=1.23.2" },
     { name = "openai", specifier = ">=2.44.0" },
     { name = "pathlib2", specifier = ">=2.3.7.post1" },
     { name = "protobuf", specifier = ">=7.35.1" },
