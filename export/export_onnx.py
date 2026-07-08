@@ -23,13 +23,6 @@ output_dir = os.path.join(project_dir, "output")
 if not os.path.exists(output_dir):
     os.mkdir(output_dir)
 onnx_model_dir = os.path.join(output_dir, "onnx")
-if not os.path.exists(onnx_model_dir):
-    os.mkdir(onnx_model_dir)
-if len(os.listdir(onnx_model_dir)) > 0:
-    print("found some file in {}, will clear it".format(onnx_model_dir))
-    for temp_file in os.listdir(onnx_model_dir):
-        temp_path = os.path.join(onnx_model_dir, temp_file)
-        os.remove(temp_path)
 
 
 def parser_arguments():
@@ -175,6 +168,14 @@ def export_onnx(
 
 if __name__ == "__main__":
     args = parser_arguments()
+    onnx_model_dir = os.path.dirname(os.path.abspath(args.onnx_model_path))
+    os.makedirs(onnx_model_dir, exist_ok=True)
+    if len(os.listdir(onnx_model_dir)) > 0:
+        print("found some file in {}, will clear it".format(onnx_model_dir))
+        for temp_file in os.listdir(onnx_model_dir):
+            temp_path = os.path.join(onnx_model_dir, temp_file)
+            if os.path.isfile(temp_path):
+                os.remove(temp_path)
     # model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
     # copy modeling_qwen2.py to model dir
     src_file_path = os.path.join(now_dir, "modeling_qwen2.py")
@@ -213,3 +214,4 @@ if __name__ == "__main__":
         num_key_value_heads=num_key_value_heads,
         per_head_dim=per_head_dim
     )
+    print("onnx export done, save in ", args.onnx_model_path)

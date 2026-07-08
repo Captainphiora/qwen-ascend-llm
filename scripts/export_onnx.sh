@@ -7,12 +7,12 @@ DTYPE=float16
 KV_CACHE_LENGTH=1024
 
 # MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
-MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
-# MODEL_NAME="Qwen2.5-0.5B-Instruct"
+# MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+MODEL_NAME="Qwen2.5-0.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
-ONNX_MODEL_PATH="./output/onnx/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
+ONNX_MODEL_PATH="./output/onnx_${MODEL_NAME}_${KV_CACHE_LENGTH}/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
 
 
 echo "开始执行 ONNX 导出，时间: $(date '+%H:%M:%S')"

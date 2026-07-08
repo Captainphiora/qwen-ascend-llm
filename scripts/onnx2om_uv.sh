@@ -11,10 +11,7 @@ KV_CACHE_LENGTH=512
 MODEL_NAME="Qwen2.5-0.5B-Instruct"
 # MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
-# OUTPUT_MODEL_PATH="./output/onnx2_qwen2.5_2048_npu/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
-# OUTPUT_MODEL_PATH="./output/onnx2/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
-OUTPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2/Qwen2.5-0.5B-Instruct_512.onnx"
-# OUTPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2/Qwen2.5-0.5B-Instruct_1024.onnx"
+OUTPUT_MODEL_PATH="./output/onnx2_${MODEL_NAME}_${KV_CACHE_LENGTH}/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
 MAX_PREFILL_LENGTH=1
 
 ONNX_MODEL_PATH=${OUTPUT_MODEL_PATH}
