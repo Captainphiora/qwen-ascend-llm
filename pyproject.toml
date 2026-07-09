@@ -11,6 +11,7 @@ dependencies = [
     "cffi>=2.0.0",
     "decorator>=5.3.1",
     "fastapi>=0.125.0",
+    "msit>=8.2.0",
     "numpy<2.0.0",
     "onnx==1.16.1",
     "onnxruntime==1.18.1",
@@ -31,3 +32,7 @@ dependencies = [
     "transformers==4.37.0",
     "uvicorn>=0.50.0",
 ]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true

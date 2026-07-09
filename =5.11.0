@@ -1,0 +1,67 @@
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/, https://pypi.org/simple/
+Collecting plotly
+  Downloading plotly-6.8.0-py3-none-any.whl.metadata (9.0 kB)
+Collecting opentelemetry-exporter-otlp-proto-grpc==1.33.1
+  Downloading opentelemetry_exporter_otlp_proto_grpc-1.33.1-py3-none-any.whl.metadata (2.5 kB)
+Collecting opentelemetry-exporter-otlp-proto-http==1.33.1
+  Downloading opentelemetry_exporter_otlp_proto_http-1.33.1-py3-none-any.whl.metadata (2.4 kB)
+Collecting deprecated>=1.2.6 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading deprecated-1.3.1-py2.py3-none-any.whl.metadata (5.9 kB)
+Collecting googleapis-common-protos~=1.52 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading googleapis_common_protos-1.75.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting grpcio<2.0.0,>=1.63.2 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading grpcio-1.82.1-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl.metadata (3.7 kB)
+Collecting opentelemetry-api~=1.15 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_api-1.43.0-py3-none-any.whl.metadata (1.4 kB)
+Collecting opentelemetry-exporter-otlp-proto-common==1.33.1 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_exporter_otlp_proto_common-1.33.1-py3-none-any.whl.metadata (1.9 kB)
+Collecting opentelemetry-proto==1.33.1 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_proto-1.33.1-py3-none-any.whl.metadata (2.4 kB)
+Collecting opentelemetry-sdk~=1.33.1 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_sdk-1.33.1-py3-none-any.whl.metadata (1.6 kB)
+Requirement already satisfied: requests~=2.7 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from opentelemetry-exporter-otlp-proto-http==1.33.1) (2.34.2)
+Collecting protobuf<6.0,>=5.0 (from opentelemetry-proto==1.33.1->opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading protobuf-5.29.6-cp38-abi3-manylinux2014_aarch64.whl.metadata (592 bytes)
+Requirement already satisfied: typing-extensions~=4.12 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from grpcio<2.0.0,>=1.63.2->opentelemetry-exporter-otlp-proto-grpc==1.33.1) (4.16.0)
+Collecting opentelemetry-api~=1.15 (from opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_api-1.33.1-py3-none-any.whl.metadata (1.6 kB)
+Collecting opentelemetry-semantic-conventions==0.54b1 (from opentelemetry-sdk~=1.33.1->opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading opentelemetry_semantic_conventions-0.54b1-py3-none-any.whl.metadata (2.5 kB)
+Collecting importlib-metadata<8.7.0,>=6.0 (from opentelemetry-api~=1.15->opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading importlib_metadata-8.6.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting zipp>=3.20 (from importlib-metadata<8.7.0,>=6.0->opentelemetry-api~=1.15->opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading zipp-4.1.0-py3-none-any.whl.metadata (3.6 kB)
+Requirement already satisfied: charset_normalizer<4,>=2 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from requests~=2.7->opentelemetry-exporter-otlp-proto-http==1.33.1) (3.4.9)
+Requirement already satisfied: idna<4,>=2.5 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from requests~=2.7->opentelemetry-exporter-otlp-proto-http==1.33.1) (3.18)
+Requirement already satisfied: urllib3<3,>=1.26 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from requests~=2.7->opentelemetry-exporter-otlp-proto-http==1.33.1) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from requests~=2.7->opentelemetry-exporter-otlp-proto-http==1.33.1) (2026.6.17)
+Collecting narwhals>=1.15.1 (from plotly)
+  Downloading narwhals-2.23.0-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: packaging in /root/miniconda3/envs/qwen_ascend_cann900/lib/python3.10/site-packages (from plotly) (26.0)
+Collecting wrapt<3,>=1.10 (from deprecated>=1.2.6->opentelemetry-exporter-otlp-proto-grpc==1.33.1)
+  Downloading wrapt-2.2.2-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (7.4 kB)
+Downloading opentelemetry_exporter_otlp_proto_grpc-1.33.1-py3-none-any.whl (18 kB)
+Downloading opentelemetry_exporter_otlp_proto_http-1.33.1-py3-none-any.whl (17 kB)
+Downloading opentelemetry_exporter_otlp_proto_common-1.33.1-py3-none-any.whl (18 kB)
+Downloading opentelemetry_proto-1.33.1-py3-none-any.whl (55 kB)
+Downloading googleapis_common_protos-1.75.0-py3-none-any.whl (300 kB)
+Downloading grpcio-1.82.1-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl (6.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.8/6.8 MB 27.8 MB/s  0:00:00
+Downloading opentelemetry_sdk-1.33.1-py3-none-any.whl (118 kB)
+Downloading opentelemetry_api-1.33.1-py3-none-any.whl (65 kB)
+Downloading opentelemetry_semantic_conventions-0.54b1-py3-none-any.whl (194 kB)
+Downloading importlib_metadata-8.6.1-py3-none-any.whl (26 kB)
+Downloading protobuf-5.29.6-cp38-abi3-manylinux2014_aarch64.whl (320 kB)
+Downloading plotly-6.8.0-py3-none-any.whl (9.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.9/9.9 MB 49.6 MB/s  0:00:00
+Downloading deprecated-1.3.1-py2.py3-none-any.whl (11 kB)
+Downloading wrapt-2.2.2-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl (154 kB)
+Downloading narwhals-2.23.0-py3-none-any.whl (458 kB)
+Downloading zipp-4.1.0-py3-none-any.whl (10 kB)
+Installing collected packages: zipp, wrapt, protobuf, narwhals, grpcio, plotly, opentelemetry-proto, importlib-metadata, googleapis-common-protos, deprecated, opentelemetry-exporter-otlp-proto-common, opentelemetry-api, opentelemetry-semantic-conventions, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-http, opentelemetry-exporter-otlp-proto-grpc
+  Attempting uninstall: protobuf
+    Found existing installation: protobuf 7.35.1
+    Uninstalling protobuf-7.35.1:
+      Successfully uninstalled protobuf-7.35.1
+
+Successfully installed deprecated-1.3.1 googleapis-common-protos-1.75.0 grpcio-1.82.1 importlib-metadata-8.6.1 narwhals-2.23.0 opentelemetry-api-1.33.1 opentelemetry-exporter-otlp-proto-common-1.33.1 opentelemetry-exporter-otlp-proto-grpc-1.33.1 opentelemetry-exporter-otlp-proto-http-1.33.1 opentelemetry-proto-1.33.1 opentelemetry-sdk-1.33.1 opentelemetry-semantic-conventions-0.54b1 plotly-6.8.0 protobuf-5.29.6 wrapt-2.2.2 zipp-4.1.0

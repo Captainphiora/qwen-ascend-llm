@@ -5,6 +5,7 @@
 DEVICE_STR=npu
 DTYPE=float16
 KV_CACHE_LENGTH=1024
+# KV_CACHE_LENGTH=4096
 
 # MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 # MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
@@ -12,12 +13,15 @@ MODEL_NAME="Qwen2.5-0.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
-ONNX_MODEL_PATH="./output/onnx_${MODEL_NAME}_${KV_CACHE_LENGTH}/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
+ONNX_MODEL_PATH="./output/onnx_test_${MODEL_NAME}_${KV_CACHE_LENGTH}/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
 
 
 echo "开始执行 ONNX 导出，时间: $(date '+%H:%M:%S')"
 echo "DEVICE_STR:$DEVICE_STR"
-uv run export/export_onnx.py \
+# uv run export/export_onnx.py \
+
+# python export/export_onnx.py \
+conda run -n qwen_ascend_cann900 python3 export/export_onnx.py \
   --device_str=$DEVICE_STR \
   --dtype=$DTYPE \
   --hf_model_dir=$HF_MODEL_DIR \

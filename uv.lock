@@ -690,6 +690,15 @@ wheels = [
 ]
 
 [[package]]
+name = "msit"
+version = "8.2.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a0/8a/96c68c68ec5a81c5c7f67a14720ae30a044935de3e60ea478d3998e16433/msit-8.2.0.zip", hash = "sha256:44bf1cda3bec7cf3708d49f10924807b547325fefa0b491d95a72eb624ad82a3" }
+
+[[package]]
 name = "networkx"
 version = "3.4.2"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
@@ -1226,6 +1235,7 @@ dependencies = [
     { name = "cffi" },
     { name = "decorator" },
     { name = "fastapi" },
+    { name = "msit" },
     { name = "numpy" },
     { name = "onnx" },
     { name = "onnxruntime" },
@@ -1257,6 +1267,7 @@ requires-dist = [
     { name = "cffi", specifier = ">=2.0.0" },
     { name = "decorator", specifier = ">=5.3.1" },
     { name = "fastapi", specifier = ">=0.125.0" },
+    { name = "msit", specifier = ">=8.2.0" },
     { name = "numpy", specifier = "<2.0.0" },
     { name = "onnx", specifier = "==1.16.1" },
     { name = "onnxruntime", specifier = "==1.18.1" },

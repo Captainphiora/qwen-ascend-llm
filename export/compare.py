@@ -212,7 +212,7 @@ command_lines = [
     "msit debug compare",
     "-gm {}".format(args.onnx_model_path),
     "-om {}".format(args.om_model_path),
-    "-c /usr/local/Ascend/ascend-toolkit/latest",
+    "-c {}".format(os.environ.get("ASCEND_TOOLKIT_HOME", "/usr/local/Ascend/ascend-toolkit/latest")),
     # '--input \"{}\"'.format(",".join(input_path_list)),
     '--input-shape \"input_ids:{};attention_mask:{};position_ids:{};past_key_values:{}\"'.format(
         ",".join(input_ids_shape),
