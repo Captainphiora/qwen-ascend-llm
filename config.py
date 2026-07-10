@@ -21,7 +21,7 @@ class InferenceConfig:
         max_output_length: int = 2048,  # 输出长度的最大值
         max_prefill_length: int = 1,  # prefile阶段，单次最大推理长度
         kvcache_method: str = "fixsize",  # kv_cache类型，支持basic,fixsize,streamllm,H2O四种，具体可以去kvcache.py查看
-        kv_cache_length: int = 2048,  # kvcache的最大长度
+        kv_cache_length: int = 2048,  # kvcache的最if system_prompt大长度
         cache_format: str = 'huggingface-tensor',  # kv_cache的格式
         dtype: str = "float16",
         torch_dtype: str = "float16",

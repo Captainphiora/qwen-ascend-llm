@@ -6,8 +6,8 @@ SESSION_TYPE="onnx"
 
 KV_CACHE_LENGTH=1024
 # KV_CACHE_LENGTH=2048
-MODEL_NAME="Qwen2-0.5B-Instruct"
-# MODEL_NAME="Qwen2-1.5B-Instruct"
+# MODEL_NAME="Qwen2-0.5B-Instruct"
+MODEL_NAME="Qwen2-1.5B-Instruct"
 # MODEL_NAME="Qwen2.5-0.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
 # MODEL_NAME="Qwen2.5-1.5B-Instruct"
@@ -31,7 +31,8 @@ MAX_OUTPUT_LENGTH=${KV_CACHE_LENGTH}
 # ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_qwen2.5_2048_cpu/Qwen2.5-1.5B-Instruct_2048.onnx"
 # ONNX_MODEL_PATH="./output/onnx_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024.onnx"
 # ONNX_MODEL_PATH="./output/onnx_Qwen2-1.5B-Instruct_1024/Qwen2-1.5B-Instruct_1024_1.onnx"
-ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2-0.5B-Instruct_1024/Qwen2-0.5B-Instruct_1024_1.onnx"
+# ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2-0.5B-Instruct_1024/Qwen2-0.5B-Instruct_1024_1.onnx"
+ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024_1.onnx"
 # uv run ./cli_chat.py \
 python3 ./cli_chat.py \
   --session_type=$SESSION_TYPE \

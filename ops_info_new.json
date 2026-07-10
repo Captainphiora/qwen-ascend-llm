@@ -1,7 +1,7 @@
 {
   "black-list": {         
      "to-remove": [],
-     "to-add": ["Square"]
+     "to-add": ["Square","BatchMatMulV2"]
   },
   "white-list": {
      "to-remove": [],

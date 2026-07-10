@@ -121,8 +121,8 @@ def parser_args():
     )
     parser.add_argument(
         "--system_prompt",
-        help="system prompt; 传空字符串则不添加 system 消息"
-             "（DeepSeek-R1 建议不使用 system prompt）。",
+        help="system prompt; 完全以命令行为准：不传或传空字符串则不添加 system 消息，"
+             "其余情况使用用户自定义的提示词。",
         type=str,
         default=SYSTEM_PROMPT,
     )
@@ -188,4 +188,32 @@ if __name__ == '__main__':
         system_prompt=args.system_prompt,
     )
     # main()
+    # 直接从真正喂给推理引擎的 config 对象读取，避免 args -> config 映射带来的误解
+    print("==================== 实际生效的推理配置(config) ====================")
+    print("session_type      : {}".format(config.session_type))
+    print("hf_model_dir      : {}".format(config.hf_model_dir))
+    print("tokenizer_dir     : {}".format(config.tokenizer_dir))
+    print("om_model_path     : {}".format(config.om_model_path))
+    print("onnx_model_path   : {}".format(config.onnx_model_path))
+    print("device_str        : {}".format(config.device_str))
+    print("device_id         : {}".format(config.device_id))
+    print("cpu_thread        : {}".format(config.cpu_thread))
+    print("max_batch         : {}".format(config.max_batch))
+    print("max_input_length  : {}".format(config.max_input_length))
+    print("max_output_length : {}".format(config.max_output_length))
+    print("max_prefill_length: {}".format(config.max_prefill_length))
+    print("kv_cache_length   : {}".format(config.kv_cache_length))
+    print("kvcache_method    : {}".format(config.kvcache_method))
+    print("cache_format      : {}".format(config.cache_format))
+    print("dtype             : {}".format(config.dtype))
+    print("torch_dtype       : {}".format(config.torch_dtype))
+    print("-------------------- 采样相关(是否 greedy) --------------------")
+    print("sampling_method   : {}".format(config.sampling_method))
+    print("sampling_value    : {}".format(config.sampling_value))
+    print("temperature       : {}".format(config.temperature))
+    is_greedy = (config.temperature == 0) or (config.sampling_method == "greedy")
+    print("=> 实际是否 greedy : {}".format(is_greedy))
+    print("-------------------- 提示词 --------------------")
+    print("system_prompt     : {!r}  (空字符串表示不添加 system 消息)".format(config.system_prompt))
+    print("================================================================")
     inference_cli()

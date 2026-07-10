@@ -13,9 +13,13 @@ MAX_PREFILL_LENGTH=1
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 # OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}
 # _910_9382.om"
-OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_exmatmul.om"
+# OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_exmatmul.om"
+OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified.om"
 
 echo "OM_MODEL_PATH:$OM_MODEL_PATH"
+
+TEMPERATURE=0
+# system_prompt
 CPU_THREAD=8
 # SOC_VERSION=Ascend310B1
 # DTYPE="float32"
@@ -27,4 +31,5 @@ python3 cli_chat.py \
   --om_model_path=$OM_MODEL_PATH \
   --max_input_length=$MAX_INPUT_LENGTH \
   --max_output_length=$MAX_OUTPUT_LENGTH \
-  --max_prefill_length=$MAX_PREFILL_LENGTH
+  --max_prefill_length=$MAX_PREFILL_LENGTH \
+  --temperature=$TEMPERATURE

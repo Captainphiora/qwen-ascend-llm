@@ -156,6 +156,14 @@ class Inference:
             tokenize=False,
             add_generation_prompt=True
         )
+        # ===== 正式推理前，打印真正喂给模型的输入与本次采样参数 =====
+        print("\n[DEBUG] ---- 本次推理实际输入(stream_predict) ----")
+        print("[DEBUG] messages: {}".format(messages))
+        print("[DEBUG] 应用 chat_template 后的完整 prompt:\n{!r}".format(text))
+        print("[DEBUG] 本次采样: sampling_method={}, sampling_value={}, temperature={}, greedy={}".format(
+            self.sampling_method, sampling_value, temperature,
+            (temperature == 0) or (self.sampling_method == "greedy")))
+        print("[DEBUG] ---------------------------")
         if self.session_type in ["onnx", "acl"]:
             input_ids = self.tokenizer(
                 [text], return_tensors="np"
