@@ -15,6 +15,7 @@ class InferenceConfig:
         sampling_method: str = "top_p",  # 支持 greedy, top_p, top_k
         sampling_value: float = 0.8,
         temperature: float = 0.7,
+        system_prompt: str = "You are a helpful assistant.",  # 为空字符串时不添加 system 消息
         max_batch: int = 1,
         max_input_length: int = 1024,  # 输入长度的最大数值
         max_output_length: int = 2048,  # 输出长度的最大值
@@ -42,6 +43,7 @@ class InferenceConfig:
         self.sampling_method = sampling_method
         self.sampling_value = sampling_value
         self.temperature = temperature
+        self.system_prompt = system_prompt
         self.max_batch = max_batch
         self.max_input_length = max_input_length
         self.max_output_length = max_output_length

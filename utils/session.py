@@ -35,6 +35,9 @@ class Session:
         else:
             self.kv_cache.reset()
 
+    def close(self):
+        pass
+
     def rollback(self,seq_len):
         self.kv_cache.rollback(seq_len)
 
@@ -156,10 +159,24 @@ class AclSession(Session):
         
     def reset(self):
         self.model.reset()
-    
+
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        if getattr(self, "model", None) is not None:
+            self.model.unload()
+            self.model = None
+        if getattr(self, "context", None) is not None:
+            from utils.engine import destroy_resource
+            destroy_resource(self.device_id, self.context)
+            self.context = None
+
     def __del__(self):
-        from utils.engine import destroy_resource
-        destroy_resource(self.device_id, self.context)
+        try:
+            self.close()
+        except Exception:
+            pass
     
     def decompose_number(self, n, start_index=0):
         """

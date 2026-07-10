@@ -23,6 +23,7 @@ class Inference:
         self.sampling_method = config.sampling_method
         self.sampling_value = config.sampling_value
         self.temperature = config.temperature
+        self.system_prompt = config.system_prompt
         self.session = Session.fromConfig(config)
         self.session_type = config.session_type
         if config.device_str == "cpu":
@@ -126,16 +127,20 @@ class Inference:
         prompt,
         history=None,
         sampling_config: dict = {},
-        system_prompt: str = "You are a helpful assistant.",
+        system_prompt: str = None,
         max_new_tokens: int = 1024,
         do_speed_test: bool = False,
         show_progress: bool = False,
     ):
         if history is None:
             history = [] 
+        if system_prompt is None:
+            system_prompt = self.system_prompt
         sampling_value = sampling_config.get("sampling_value", self.sampling_value)
         temperature = sampling_config.get("temperature", self.temperature)
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         # print("prompt: ", prompt)
         with self.lock:
             self.state['isEnd'],self.state['message'] = False,""   
@@ -233,15 +238,19 @@ class Inference:
         prompt,
         history=None,
         sampling_config: dict = {},
-        system_prompt: str="You are a helpful assistant.",
+        system_prompt: str = None,
         max_new_tokens: int = 1024,
         show_progress: bool = False,
     ):
         if history is None:
             history = []
+        if system_prompt is None:
+            system_prompt = self.system_prompt
         sampling_value = sampling_config.get("sampling_value", self.sampling_value)
         temperature = sampling_config.get("temperature", self.temperature)
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         # print("prompt: ", prompt)
         with self.lock:
             self.state['isEnd'], self.state['message'] = False,""

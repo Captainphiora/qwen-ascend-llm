@@ -318,11 +318,11 @@ class ACLModel:
         释放内存
         """
         print("[INFO] free input and output buffer")
-        for i, item in enumerate(self.input_data):
+        for i, item in enumerate(self.inputs):
             ret = acl.rt.free(item["buffer"])
             check_ret(f"free input[{i}] device memory",ret)
         ret = acl.mdl.destroy_dataset(self.input_dataset)
-        for i, item in enumerate(self.output_data):
+        for i, item in enumerate(self.outputs):
             ret = acl.rt.free(item["buffer"])
             check_ret("free output device memory",ret)
             # 分配结果只分配了logitst的CPU内存，所以释放的时候也只释放logists的

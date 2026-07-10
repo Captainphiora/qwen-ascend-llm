@@ -49,6 +49,8 @@ config = InferenceConfig(
     max_input_length=args.max_input_length,
     kv_cache_length=args.max_output_length,
     max_prefill_length=max_prefill_length,
+    temperature=args.temperature,
+    system_prompt=args.system_prompt,
 )
 
 # init Inference
@@ -410,7 +412,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
     if len(prev_messages) > 0 and prev_messages[0].role == "system":
         system = prev_messages.pop(0).content
     else:
-        system = "You are a helpful assistant."
+        system = config.system_prompt
 
     # history = []
     # if len(prev_messages) % 2 == 0:

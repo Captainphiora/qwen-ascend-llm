@@ -23,6 +23,10 @@ TORCH_DTYPE = "float32"
 DEVICE_STR = "npu"
 MAX_BATCH = 1
 ONNX_MODEL_PATH = os.path.join(project_dir, "output", "onnx", "qwen2_1.5b_chat.onnx")
+# 采样与对话模板相关默认值（可被命令行覆盖；API 部署时再被单次请求覆盖）
+# DeepSeek-R1 官方建议不使用 system prompt，故默认置空；温度推荐 0.6
+TEMPERATURE = 0.6
+SYSTEM_PROMPT = ""
 
 
 def parser_args():
@@ -108,6 +112,20 @@ def parser_args():
         type=int,
         default=MAX_OUTPUT_LENGTH,
     )
+    parser.add_argument(
+        "--temperature",
+        help="sampling temperature; config 默认值可被此命令行参数覆盖，"
+             "API 部署时再被单次请求的 temperature 覆盖。设为 0 等价于 greedy。",
+        type=float,
+        default=TEMPERATURE,
+    )
+    parser.add_argument(
+        "--system_prompt",
+        help="system prompt; 传空字符串则不添加 system 消息"
+             "（DeepSeek-R1 建议不使用 system prompt）。",
+        type=str,
+        default=SYSTEM_PROMPT,
+    )
     return parser.parse_args()
 
 
@@ -165,7 +183,9 @@ if __name__ == '__main__':
         kv_cache_length=args.max_output_length,
         max_prefill_length=max_prefill_length,
         dtype=args.dtype,
-        torch_dtype=args.torch_dtype
+        torch_dtype=args.torch_dtype,
+        temperature=args.temperature,
+        system_prompt=args.system_prompt,
     )
     # main()
     inference_cli()

@@ -126,7 +126,7 @@ def get_inputs(kv_cache, seq_len: int, real_kv_size=0, input_pos=0, past_kv_size
 
 tokenizer = Qwen2Tokenizer.from_pretrained(args.hf_model_dir)
 model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
-prompt = "你好"
+prompt = "背诵《出师表》"
 system_prompt: str = "You are a helpful assistant."
 history = []
 if len(history) == 0:
@@ -141,7 +141,7 @@ text = tokenizer.apply_chat_template(
 print("raw_text", text)
 input_ids = tokenizer(
     [text], return_tensors="np"
-)["input_ids"].astype(np.int64)[:, :1]
+)["input_ids"].astype(np.int64)[:, -1:]
 print("input_ids", input_ids)
 
 # options = onnxruntime.SessionOptions()
@@ -213,7 +213,7 @@ command_lines = [
     "-gm {}".format(args.onnx_model_path),
     "-om {}".format(args.om_model_path),
     "-c {}".format(os.environ.get("ASCEND_TOOLKIT_HOME", "/usr/local/Ascend/ascend-toolkit/latest")),
-    # '--input \"{}\"'.format(",".join(input_path_list)),
+    '--input \"{}\"'.format(",".join(input_path_list)),
     '--input-shape \"input_ids:{};attention_mask:{};position_ids:{};past_key_values:{}\"'.format(
         ",".join(input_ids_shape),
         ",".join(attention_mask_shape),
@@ -231,3 +231,63 @@ subprocess.run(
     shell=True,
     check=True,
 )
+
+
+# ============ compare final inference results (onnx vs om) ============
+import glob
+
+
+def _find_latest_result_dir(base):
+    subdirs = [
+        os.path.join(base, name)
+        for name in os.listdir(base)
+        if os.path.isdir(os.path.join(base, name)) and name[:8].isdigit()
+    ]
+    return max(subdirs, key=os.path.getmtime) if subdirs else None
+
+
+def _topk_from_logits(logits, k=5):
+    row = logits.reshape(-1, logits.shape[-1])[-1].astype(np.float32)
+    order = row.argsort()[::-1][:k]
+    return [(int(i), tokenizer.decode([int(i)]), float(row[i])) for i in order]
+
+
+result_dir = _find_latest_result_dir(result_output_dir)
+print("\n============ inference result compare (onnx vs om) ==============")
+try:
+    onnx_glob = os.path.join(result_dir, "dump_data", "onnx", "_Cast.0.*.npy")
+    onnx_logits = np.load(sorted(glob.glob(onnx_glob))[0])
+
+    npu_glob = os.path.join(result_dir, "dump_data", "npu", "**", "Cast._Cast.*")
+    npu_raw = [f for f in glob.glob(npu_glob, recursive=True) if not f.endswith(".npy")]
+    convert_out = os.path.join(result_dir, "npu_final_output")
+    os.makedirs(convert_out, exist_ok=True)
+    msaccucmp = os.path.join(
+        os.environ.get("ASCEND_TOOLKIT_HOME", "/usr/local/Ascend/ascend-toolkit/latest"),
+        "toolkit", "tools", "operator_cmp", "compare", "msaccucmp.py"
+    )
+    subprocess.run(
+        "python3 {} convert -d {} -out {}".format(msaccucmp, npu_raw[0], convert_out),
+        shell=True, check=True
+    )
+    npu_logits = np.load(sorted(glob.glob(os.path.join(convert_out, "*.output.0.npy")))[0])
+
+    onnx_top = _topk_from_logits(onnx_logits)
+    npu_top = _topk_from_logits(npu_logits)
+    onnx_next, npu_next = onnx_top[0][0], npu_top[0][0]
+
+    print("prompt      :", prompt)
+    print("input token :", input_ids.tolist())
+    print("-" * 52)
+    print("[ONNX] next token id={} content={!r}".format(onnx_next, tokenizer.decode([onnx_next])))
+    print("[OM  ] next token id={} content={!r}".format(npu_next, tokenizer.decode([npu_next])))
+    print("prediction match :", "YES" if onnx_next == npu_next else "NO")
+    print("-" * 52)
+    print("ONNX top5:")
+    for tid, txt, val in onnx_top:
+        print("   id={:<7} logit={:+.4f} {!r}".format(tid, val, txt))
+    print("OM   top5:")
+    for tid, txt, val in npu_top:
+        print("   id={:<7} logit={:+.4f} {!r}".format(tid, val, txt))
+except Exception as exc:
+    print("inference result compare failed:", exc)
