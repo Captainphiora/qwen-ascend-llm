@@ -4,9 +4,14 @@ download/
 output/
 inference/
 kernel_meta/
-*/__pycache__/
 __pycache__/
-./*/__pycache__/
+**/__pycache__/
 export/*.json
 fusion_result.json
 result/
+.venv/
+*.pyc
+*.egg-info/
+ge_check_op.json
+ops_info.json
+ops_info_new.json

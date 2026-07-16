@@ -10,11 +10,11 @@ project_dir = os.path.dirname(os.path.abspath(__file__))
 SESSION_TYPE = "acl"
 MODEL_NAME = "DeepSeek-R1-Distill-Qwen-1.5B"
 HF_MODEL_DIR = f"/mnt/host-model/cxj/models/{MODEL_NAME}"
-MAX_INPUT_LENGTH = 1024
-MAX_OUTPUT_LENGTH = 1024
-KV_CACHE_LENGTH = 1024
+MAX_INPUT_LENGTH = 4095
+MAX_OUTPUT_LENGTH = 4096
+KV_CACHE_LENGTH = 4096
 MAX_PREFILL_LENGTH = 1
-OM_MODEL_PATH = f"./output/model_910_uv/{MODEL_NAME}_{KV_CACHE_LENGTH}_{MAX_PREFILL_LENGTH}.om"
+OM_MODEL_PATH = f"./output/model_310_cann900/{MODEL_NAME}_{KV_CACHE_LENGTH}_{MAX_PREFILL_LENGTH}_sim.om"
 CPU_THREAD = 8
 
 # 原本未指定的其他参数，保留默认值
@@ -167,10 +167,10 @@ def inference_cli():
         history.append([input_text, response])
 
 
-if __name__ == '__main__':
+def main_cli():
     args = parser_args()
     max_prefill_log2 = int(math.log2(args.max_prefill_length))
-    max_prefill_length = 2 ** max_prefill_log2 
+    max_prefill_length = 2 ** max_prefill_log2
     config = InferenceConfig(
         hf_model_dir=args.hf_model_dir,
         om_model_path=args.om_model_path,
@@ -188,8 +188,6 @@ if __name__ == '__main__':
         system_prompt=args.system_prompt,
         device_str=args.device_str,
     )
-    # main()
-    # 直接从真正喂给推理引擎的 config 对象读取，避免 args -> config 映射带来的误解
     print("==================== 实际生效的推理配置(config) ====================")
     print("session_type      : {}".format(config.session_type))
     print("hf_model_dir      : {}".format(config.hf_model_dir))
@@ -218,3 +216,7 @@ if __name__ == '__main__':
     print("system_prompt     : {!r}  (空字符串表示不添加 system 消息)".format(config.system_prompt))
     print("================================================================")
     inference_cli()
+
+
+if __name__ == '__main__':
+    main_cli()

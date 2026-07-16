@@ -17,7 +17,7 @@ while True:
         continue
     messages.append({"role": "user", "content": prompt})
     completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
+        model="DeepSeek-R1-Distill-Qwen-1.5B",
         messages=messages,
         top_p=0.5,
         temperature=0,

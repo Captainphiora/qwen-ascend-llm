@@ -63,8 +63,9 @@ def parser_arguments():
     parser.add_argument(
         "--simplify",
         help="run onnxsim to simplify the exported ONNX model",
-        action="store_true",
-        default=False,
+        type=str,
+        choices=["true", "false"],
+        default="false",
     )
     return parser.parse_args()
 
@@ -98,10 +99,17 @@ def simplify_onnx(onnx_model_path: str, output_path: str = None):
         base, ext = os.path.splitext(onnx_model_path)
         output_path = f"{base}_sim{ext}"
     print(f"Running onnxsim on: {onnx_model_path}")
-    model = onnx.load(onnx_model_path)
+    model = onnx.load(onnx_model_path, load_external_data=True)
     model_sim, check = onnxsim.simplify(model)
     if check:
-        onnx.save(model_sim, output_path)
+        data_file = os.path.basename(output_path) + ".data"
+        onnx.save(
+            model_sim,
+            output_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location=data_file,
+        )
         print(f"Simplified model saved to: {output_path}")
         print_onnx_node_info(output_path)
         return output_path
@@ -264,5 +272,5 @@ if __name__ == "__main__":
     )
     print("onnx export done, save in ", args.onnx_model_path)
     print_onnx_node_info(args.onnx_model_path)
-    if args.simplify:
+    if args.simplify == "true":
         simplify_onnx(args.onnx_model_path)

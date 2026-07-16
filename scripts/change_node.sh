@@ -21,13 +21,13 @@ MAX_OUTPUT_LENGTH=1024
 # OUTPUT_MODEL_PATH="./output/onnx2/Qwen2.5-1.5B-Instruct_${MAX_OUTPUT_LENGTH}.onnx"
 # INPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024.onnx"
 # OUTPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024.onnx"
-INPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_test_Qwen2.5-0.5B-Instruct_1024/Qwen2.5-0.5B-Instruct_1024.onnx"
+INPUT_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096_simplified/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified_sim.onnx"
 # INPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_test_Qwen2.5-0.5B-Instruct_1024/Qwen2.5-0.5B-Instruct_1024.onnx"
 
-OUTPUT_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_test_Qwen2.5-0.5B-Instruct_1024/Qwen2.5-0.5B-Instruct_1024.onnx"
+OUTPUT_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096_simplified_changenode/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified_sim.onnx"
 
 # uv run export/change_node.py \
-# python3 export/change_node.py \
-conda run -n qwen_ascend_cann900 python3 export/change_node.py \
+# conda run -n qwen_ascend_cann900 python3 export/change_node.py \
+python3 export/change_node.py \
   --input_model_path=$INPUT_MODEL_PATH \
   --output_model_path=$OUTPUT_MODEL_PATH

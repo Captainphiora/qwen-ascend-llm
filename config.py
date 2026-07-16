@@ -9,20 +9,20 @@ class InferenceConfig:
         hf_model_dir: str,
         om_model_path: str,
         onnx_model_path: str,
-        cpu_thread: int = 4,  # CPU线程数
-        session_type: str = "acl",  # 支持acl和onnx, pytorch三种，acl即Ascend C Language
+        cpu_thread: int = 4,
+        session_type: str = "acl",
         device_id: int = 0,
-        sampling_method: str = "top_p",  # 支持 greedy, top_p, top_k
+        sampling_method: str = "top_p",
         sampling_value: float = 0.8,
         temperature: float = 0.7,
-        system_prompt: str = "You are a helpful assistant.",  # 为空字符串时不添加 system 消息
+        system_prompt: str = "You are a helpful assistant.",
         max_batch: int = 1,
-        max_input_length: int = 1024,  # 输入长度的最大数值
-        max_output_length: int = 2048,  # 输出长度的最大值
-        max_prefill_length: int = 1,  # prefile阶段，单次最大推理长度
-        kvcache_method: str = "fixsize",  # kv_cache类型，支持basic,fixsize,streamllm,H2O四种，具体可以去kvcache.py查看
-        kv_cache_length: int = 2048,  # kvcache的最if system_prompt大长度
-        cache_format: str = 'huggingface-tensor',  # kv_cache的格式
+        max_input_length: int = 1024,
+        max_output_length: int = 2048,
+        max_prefill_length: int = 1,
+        kvcache_method: str = "fixsize",
+        kv_cache_length: int = 2048,
+        cache_format: str = 'huggingface-tensor',
         dtype: str = "float16",
         torch_dtype: str = "float16",
         device_str: str = "cpu",

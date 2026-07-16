@@ -16,7 +16,8 @@ HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 # OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}
 # _910_9382.om"
 # OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_exmatmul.om"
-OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified.om"
+# OM_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified.om"
+OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om"
 
 echo "OM_MODEL_PATH:$OM_MODEL_PATH"
 

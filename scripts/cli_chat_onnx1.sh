@@ -35,7 +35,9 @@ TEMPERATURE=0
 # ONNX_MODEL_PATH="./output/onnx_Qwen2-1.5B-Instruct_1024/Qwen2-1.5B-Instruct_1024_1.onnx"
 # ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2-0.5B-Instruct_1024/Qwen2-0.5B-Instruct_1024_1.onnx"
 # ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024_1.onnx"
-ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
+# ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
+# ONNX_MODEL_PATH="output/onnx_test_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
+ONNX_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096_simplified/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified_sim.onnx"
 # uv run ./cli_chat.py \
 python3 ./cli_chat.py \
   --session_type=$SESSION_TYPE \

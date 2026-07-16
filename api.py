@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import os
 import time
 from typing import List, Literal, Optional, Union, Dict
 import uvicorn
@@ -8,7 +9,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
-from cli_chat import parser_args
 from config import InferenceConfig
 import copy
 import math
@@ -16,12 +16,59 @@ import re
 from utils.inference import Inference
 
 
+def _build_config_from_json(config_path: str) -> InferenceConfig:
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    model_cfg = cfg.get("model", {})
+    gen_cfg = cfg.get("generation", {})
+    max_prefill = model_cfg.get("max_prefill_length", 1)
+    max_prefill = 2 ** int(math.log2(max_prefill))
+    return InferenceConfig(
+        hf_model_dir=model_cfg["hf_model_dir"],
+        om_model_path=model_cfg.get("om_model_path", ""),
+        onnx_model_path=model_cfg.get("onnx_model_path", ""),
+        session_type=model_cfg.get("session_type", "acl"),
+        device_id=model_cfg.get("device_id", 0),
+        max_batch=model_cfg.get("max_batch", 1),
+        max_input_length=model_cfg.get("max_input_length", 4095),
+        max_output_length=model_cfg.get("max_output_length", 4096),
+        kv_cache_length=model_cfg.get("kv_cache_length", 4096),
+        max_prefill_length=max_prefill,
+        dtype=model_cfg.get("dtype", "float16"),
+        torch_dtype=model_cfg.get("torch_dtype", "float16"),
+        device_str=model_cfg.get("device_str", "npu"),
+        temperature=gen_cfg.get("temperature", 0.6),
+        sampling_method=gen_cfg.get("sampling_method", "top_p"),
+        sampling_value=gen_cfg.get("sampling_value", 0.8),
+        system_prompt=gen_cfg.get("system_prompt", ""),
+    )
+
+
+def _build_config_from_args():
+    from cli_chat import parser_args
+    args = parser_args()
+    max_prefill_log2 = int(math.log2(args.max_prefill_length))
+    max_prefill_length = 2 ** max_prefill_log2
+    return InferenceConfig(
+        hf_model_dir=args.hf_model_dir,
+        om_model_path=args.om_model_path,
+        onnx_model_path=args.onnx_model_path,
+        session_type=args.session_type,
+        max_batch=args.max_batch,
+        max_output_length=args.max_output_length,
+        max_input_length=args.max_input_length,
+        kv_cache_length=args.max_output_length,
+        max_prefill_length=max_prefill_length,
+        temperature=args.temperature,
+        system_prompt=args.system_prompt,
+    )
+
+
 def _gc(forced: bool = False):
     import gc
 
     gc.collect()
-    # if torch.cuda.is_available():
-    #     torch.cuda.empty_cache()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,31 +83,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-args = parser_args()
-max_prefill_log2 = int(math.log2(args.max_prefill_length))
-max_prefill_length = 2 ** max_prefill_log2 
-config = InferenceConfig(
-    hf_model_dir=args.hf_model_dir,
-    om_model_path=args.om_model_path,
-    onnx_model_path=args.onnx_model_path,
-    session_type=args.session_type,
-    max_batch=args.max_batch,
-    max_output_length=args.max_output_length,
-    max_input_length=args.max_input_length,
-    kv_cache_length=args.max_output_length,
-    max_prefill_length=max_prefill_length,
-    temperature=args.temperature,
-    system_prompt=args.system_prompt,
-)
 
-# init Inference
+_config_path = os.environ.get("_SERVING_CONFIG_PATH", "")
+if _config_path and os.path.isfile(_config_path):
+    config = _build_config_from_json(_config_path)
+else:
+    config = _build_config_from_args()
+
 infer_engine = Inference(config)
-show_progress=True
+show_progress = True
 
 
 @app.get("/")
 async def root():
-    return "Hello! This is QWen-Chat-7B API."
+    return {"message": "DeepSeek-R1-Distill-Qwen-1.5B API is running", "status": "ok"}
 
 
 class Data(BaseModel):
@@ -139,8 +175,7 @@ class ChatCompletionResponse(BaseModel):
 
 @app.get("/v1/models", response_model=ModelList)
 async def list_models():
-    global model_args
-    model_card = ModelCard(id="gpt-3.5-turbo")
+    model_card = ModelCard(id="DeepSeek-R1-Distill-Qwen-1.5B")
     return ModelList(data=[model_card])
 
 
@@ -550,4 +585,3 @@ async def stream_predict(
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, workers=1)
     # uvicorn.run(app, host="localhost", port=8000, workers=1)
-
