@@ -1,29 +1,16 @@
-# source ~/.bashrc_uv_cann82 
-
 SESSION_TYPE="onnx"
-# DEVICE_STR=cpu
-DEVICE_STR=npu
-# KV_CACHE_LENGTH=2048
-KV_CACHE_LENGTH=1024
-# KV_CACHE_LENGTH=1024
-# MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
-# MODEL_NAME="Qwen2-1.5B-Instruct"
-# MODEL_NAME="Qwen2.5-0.5B-Instruct"
-# MODEL_NAME="Qwen2.5-1.5B-Instruct"
-MODEL_NAME="Qwen2.5-1.5B-Instruct"
+# DEVICE_STR="cpu"
+DEVICE_STR="npu"
+KV_CACHE_LENGTH=4096
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 DTYPE="float16"
-# DTYPE="float32"
 MAX_INPUT_LENGTH=1024
-# KV_CACHE_LENGTH=1024
 CPU_THREAD=8
 MAX_OUTPUT_LENGTH=${KV_CACHE_LENGTH}
-
-# ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024.onnx"
-ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_Qwen2.5-1.5B-Instruct_1024/Qwen2.5-1.5B-Instruct_1024_rectified.onnx"
-# ONNX_MODEL_PATH="/mnt/host-model/cxj/qwen-ascend-llm/output/onnx2_Qwen2-1.5B-Instruct_1024/Qwen2-1.5B-Instruct_1024.onnx"
-TEMPERATURE=0
-# uv run ./cli_chat.py \
+ONNX_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified.onnx"
+# TEMPERATURE=0
+TEMPERATURE=0.6
 python3 ./cli_chat.py \
   --session_type=$SESSION_TYPE \
   --hf_model_dir=$HF_MODEL_DIR \

@@ -15,6 +15,7 @@ from modeling_qwen2 import Qwen2ForCausalLM
 import onnx
 import io
 import argparse
+from collections import Counter
 
 
 now_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +60,54 @@ def parser_arguments():
         type=int,
         default=2048,
     )
+    parser.add_argument(
+        "--simplify",
+        help="run onnxsim to simplify the exported ONNX model",
+        action="store_true",
+        default=False,
+    )
     return parser.parse_args()
+
+
+def print_onnx_node_info(onnx_model_path: str):
+    """Load the exported ONNX model and print node statistics."""
+    model = onnx.load(onnx_model_path)
+    nodes = model.graph.node
+    total_nodes = len(nodes)
+    op_counter = Counter(node.op_type for node in nodes)
+    print("=" * 60)
+    print(f"ONNX Node Statistics: {onnx_model_path}")
+    print(f"  Total nodes: {total_nodes}")
+    print(f"  Unique op types: {len(op_counter)}")
+    print("-" * 60)
+    print(f"  {'Op Type':<30} {'Count':>6}")
+    print("-" * 60)
+    for op_type, count in op_counter.most_common():
+        print(f"  {op_type:<30} {count:>6}")
+    print("=" * 60)
+
+
+def simplify_onnx(onnx_model_path: str, output_path: str = None):
+    """Simplify the ONNX model using onnxsim and save it."""
+    try:
+        import onnxsim
+    except ImportError:
+        print("[ERROR] onnxsim not installed. Install via: pip install onnxsim")
+        return None
+    if output_path is None:
+        base, ext = os.path.splitext(onnx_model_path)
+        output_path = f"{base}_sim{ext}"
+    print(f"Running onnxsim on: {onnx_model_path}")
+    model = onnx.load(onnx_model_path)
+    model_sim, check = onnxsim.simplify(model)
+    if check:
+        onnx.save(model_sim, output_path)
+        print(f"Simplified model saved to: {output_path}")
+        print_onnx_node_info(output_path)
+        return output_path
+    else:
+        print("[WARNING] onnxsim simplification failed validation check")
+        return None
 
 
 def export_onnx(
@@ -215,3 +263,6 @@ if __name__ == "__main__":
         per_head_dim=per_head_dim
     )
     print("onnx export done, save in ", args.onnx_model_path)
+    print_onnx_node_info(args.onnx_model_path)
+    if args.simplify:
+        simplify_onnx(args.onnx_model_path)

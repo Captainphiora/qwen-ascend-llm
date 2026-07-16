@@ -5,7 +5,7 @@ import numpy as np
 import onnxruntime
 import argparse
 from transformers.models.qwen2 import Qwen2Tokenizer, Qwen2Config
-
+from transformers import AutoTokenizer
 
 now_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(now_dir)
@@ -124,7 +124,7 @@ def get_inputs(kv_cache, seq_len: int, real_kv_size=0, input_pos=0, past_kv_size
     return cache, mask, pos_id
 
 
-tokenizer = Qwen2Tokenizer.from_pretrained(args.hf_model_dir)
+tokenizer = AutoTokenizer.from_pretrained(args.hf_model_dir)
 model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
 prompt = "背诵《出师表》"
 system_prompt: str = "You are a helpful assistant."

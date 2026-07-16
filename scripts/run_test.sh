@@ -40,11 +40,11 @@ ONNX_MODEL_PATH=${OUTPUT_MODEL_PATH}
 # OM_MODEL_PATH="./output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}"
 # OM_MODEL_PATH="./output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified"
 # OM_MODEL_PATH="./output/model_310_cann850/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified"
-OM_MODEL_PATH="./output/model_310_cann820/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified"
+OM_MODEL_PATH="./output/model_910_cann900/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}_rectified"
 # OM_MODEL_PATH="./output/model_910/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}"
 MAX_INPUT_LENGTH=1024
 CPU_THREAD=64
-SOC_VERSION=Ascend310B1
+# SOC_VERSION=Ascend310B1
 
 
 
@@ -56,8 +56,8 @@ python3 export/onnx2om.py \
   --om_model_path=$OM_MODEL_PATH \
   --kv_cache_length=$KV_CACHE_LENGTH \
   --cpu_thread=$CPU_THREAD \
-  --max_prefill_length=$MAX_PREFILL_LENGTH \
-  --soc_version=$SOC_VERSION
+  --max_prefill_length=$MAX_PREFILL_LENGTH
+  # --soc_version=$SOC_VERSION
 echo "om转换完成，时间: $(date '+%H:%M:%S')"
 
 

@@ -186,6 +186,7 @@ if __name__ == '__main__':
         torch_dtype=args.torch_dtype,
         temperature=args.temperature,
         system_prompt=args.system_prompt,
+        device_str=args.device_str,
     )
     # main()
     # 直接从真正喂给推理引擎的 config 对象读取，避免 args -> config 映射带来的误解
