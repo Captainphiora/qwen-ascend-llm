@@ -21,7 +21,7 @@ OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim
 
 echo "OM_MODEL_PATH:$OM_MODEL_PATH"
 
-TEMPERATURE=0
+TEMPERATURE=0.6
 # system_prompt
 CPU_THREAD=8
 # SOC_VERSION=Ascend310B1
