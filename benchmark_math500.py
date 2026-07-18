@@ -3,16 +3,19 @@ import re
 import os
 from collections import defaultdict
 import multiprocessing as mp
-
+import datetime
 HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
 OM_MODEL_PATH = "output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_65536_8.om"
 DATASET_PATH = "../dataset/math500/test.jsonl"
-OUTPUT_PATH = "results/math500_results.jsonl"
+RESULT_DIR="results_math500_k1"
+OUTPUT_PATH = os.path.join(RESULT_DIR, "math500_results.jsonl")
+METRICS_TXT_PATH = os.path.join(RESULT_DIR, "math500_metrics.txt")
+# OUTPUT_PATH = "results/math500_results.jsonl"
 KV_CACHE_LENGTH = 65536
 MAX_INPUT_LENGTH = 32768
 MAX_NEW_TOKENS = 32768
 MAX_PREFILL_LENGTH = 8
-K = 4
+K = 1
 NUM_DEVICES = 16
 
 
@@ -104,8 +107,10 @@ def load_finished_ids(path: str) -> set:
 
 
 def main():
-    os.makedirs("results", exist_ok=True)
-    dataset = load_dataset(DATASET_PATH)
+    # os.makedirs("results", exist_ok=True)
+    os.makedirs(RESULT_DIR, exist_ok=True)
+    # dataset = load_dataset(DATASET_PATH)[:]
+    dataset = load_dataset(DATASET_PATH)[:8]
 
     finished_ids = load_finished_ids(OUTPUT_PATH)
     if finished_ids:
@@ -117,7 +122,8 @@ def main():
 
     # split dataset across devices
     chunks = [dataset[i::NUM_DEVICES] for i in range(NUM_DEVICES)]
-    tmp_paths = [f"results/_tmp_device_{i}.jsonl" for i in range(NUM_DEVICES)]
+    # tmp_paths = [f"results/_tmp_device_{i}.jsonl" for i in range(NUM_DEVICES)]
+    tmp_paths = [os.path.join(RESULT_DIR, f"_tmp_device_{i}.jsonl") for i in range(NUM_DEVICES)]
 
     processes = []
     for i in range(NUM_DEVICES):
@@ -141,7 +147,7 @@ def main():
             for line in f:
                 r = json.loads(line)
                 records[r["unique_id"]] = r
-        os.remove(path)
+        # os.remove(path)
 
     ordered = [records[item["unique_id"]] for item in dataset if item["unique_id"] in records]
 
@@ -161,13 +167,34 @@ def main():
         level_stats[r["level"]][1] += 1
 
     total = len(ordered)
-    print(f"\n=== pass@1 (k={K}): {correct_total/total:.4f}  ({correct_total:.1f}/{total}) ===")
-    print("\n--- By Subject ---")
+    # print(f"\n=== pass@1 (k={K}): {correct_total/total:.4f}  ({correct_total:.1f}/{total}) ===")
+    # print("\n--- By Subject ---")
+    # for subj, (c, t) in sorted(subject_stats.items()):
+    #     print(f"  {subj}: {c/t:.4f}  ({c:.1f}/{t})")
+    # print("\n--- By Level ---")
+    # for lvl, (c, t) in sorted(level_stats.items()):
+    #     print(f"  Level {lvl}: {c/t:.4f}  ({c:.1f}/{t})")
+
+
+    # 组装所有统计内容（和原控制台格式完全一致）
+    metrics_lines = []
+    metrics_lines.append(f"=== pass@1 (k={K}): {correct_total/total:.4f}  ({correct_total:.1f}/{total}) ===")
+    metrics_lines.append("\n--- By Subject ---")
     for subj, (c, t) in sorted(subject_stats.items()):
-        print(f"  {subj}: {c/t:.4f}  ({c:.1f}/{t})")
-    print("\n--- By Level ---")
+        metrics_lines.append(f"  {subj}: {c/t:.4f}  ({c:.1f}/{t})")
+    metrics_lines.append("\n--- By Level ---")
     for lvl, (c, t) in sorted(level_stats.items()):
-        print(f"  Level {lvl}: {c/t:.4f}  ({c:.1f}/{t})")
+        metrics_lines.append(f"  Level {lvl}: {c/t:.4f}  ({c:.1f}/{t})")
+    
+    metrics_text = "\n".join(metrics_lines)
+
+    # 1. 控制台打印（和原输出效果完全一致）
+    print("\n" + metrics_text)
+
+    # 2. 写入txt文件
+    with open(METRICS_TXT_PATH, "w", encoding="utf-8") as f:
+        f.write(metrics_text + "\n")
+    print(f"\n[完成] 统计结果已保存至 {METRICS_TXT_PATH}")
 
 
 if __name__ == "__main__":
