@@ -114,10 +114,15 @@ def parser_args():
     )
     parser.add_argument(
         "--temperature",
-        help="sampling temperature; config 默认值可被此命令行参数覆盖，"
-             "API 部署时再被单次请求的 temperature 覆盖。设为 0 等价于 greedy。",
+        help="sampling temperature; 设为 0 等价于 greedy。",
         type=float,
         default=TEMPERATURE,
+    )
+    parser.add_argument(
+        "--top_p",
+        help="top-p (nucleus) sampling value, range (0, 1].",
+        type=float,
+        default=0.8,
     )
     parser.add_argument(
         "--system_prompt",
@@ -129,7 +134,7 @@ def parser_args():
     return parser.parse_args()
 
 
-def inference_cli():
+def inference_cli(config):
     infer_engine = Inference(config)
     print("\n欢迎使用Qwen聊天机器人，输入exit或者quit退出，输入clear清空历史记录")
     history = []
@@ -185,6 +190,7 @@ def main_cli():
         dtype=args.dtype,
         torch_dtype=args.torch_dtype,
         temperature=args.temperature,
+        sampling_value=args.top_p,
         system_prompt=args.system_prompt,
         device_str=args.device_str,
     )
@@ -208,14 +214,14 @@ def main_cli():
     print("torch_dtype       : {}".format(config.torch_dtype))
     print("-------------------- 采样相关(是否 greedy) --------------------")
     print("sampling_method   : {}".format(config.sampling_method))
-    print("sampling_value    : {}".format(config.sampling_value))
+    print("sampling_value(p) : {}".format(config.sampling_value))
     print("temperature       : {}".format(config.temperature))
     is_greedy = (config.temperature == 0) or (config.sampling_method == "greedy")
     print("=> 实际是否 greedy : {}".format(is_greedy))
     print("-------------------- 提示词 --------------------")
     print("system_prompt     : {!r}  (空字符串表示不添加 system 消息)".format(config.system_prompt))
     print("================================================================")
-    inference_cli()
+    inference_cli(config)
 
 
 if __name__ == '__main__':

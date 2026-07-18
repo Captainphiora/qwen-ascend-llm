@@ -58,7 +58,7 @@ def worker(device_id: int, items: list, result_path: str):
     )
     engine = Inference(config)
 
-    with open(result_path, "w", encoding="utf-8") as fout:
+    with open(result_path, "a", encoding="utf-8") as fout:
         for item in items:
             ground_truth = normalize_answer(item["answer"])
             samples = []
@@ -90,9 +90,30 @@ def worker(device_id: int, items: list, result_path: str):
     engine.session.close()
 
 
+def load_finished_ids(path: str) -> set:
+    if not os.path.exists(path):
+        return set()
+    finished = set()
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                finished.add(json.loads(line)["unique_id"])
+            except Exception:
+                pass
+    return finished
+
+
 def main():
     os.makedirs("results", exist_ok=True)
     dataset = load_dataset(DATASET_PATH)
+
+    finished_ids = load_finished_ids(OUTPUT_PATH)
+    if finished_ids:
+        print(f"[resume] skipping {len(finished_ids)} finished items")
+    dataset = [item for item in dataset if item["unique_id"] not in finished_ids]
+    if not dataset:
+        print("All items already finished.")
+        return
 
     # split dataset across devices
     chunks = [dataset[i::NUM_DEVICES] for i in range(NUM_DEVICES)]
