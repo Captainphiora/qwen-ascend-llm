@@ -5,6 +5,7 @@
 # 用法:
 #   第一步 - 采集:  python profile_inference.py
 #   第二步 - 解析:  bash run_profiling.sh --parse
+#   第三步 - 分析： python analyze_profiling.py
 # ============================================================
 
 set -e

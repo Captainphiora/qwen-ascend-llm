@@ -1,0 +1,55 @@
+onnxruntime cpuid_info warning: Unknown CPU vendor. cpuinfo_vendor value: 15
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+[Benchmark] 配置:
+  OM模型: ./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om
+  max_prefill_length: 1
+  kv_cache_length: 4096
+[Benchmark] 加载模型...
+[INFO] acl init
+[INFO] acl set device, device_id: 0
+[INFO] acl create context
+[INFO] load model buffer 0.00%[INFO] load model buffer 1.47%[INFO] load model buffer 2.94%[INFO] load model buffer 4.42%[INFO] load model buffer 5.89%[INFO] load model buffer 7.36%[INFO] load model buffer 8.83%[INFO] load model buffer 10.31%[INFO] load model buffer 11.78%[INFO] load model buffer 13.25%[INFO] load model buffer 14.72%[INFO] load model buffer 16.20%[INFO] load model buffer 17.67%[INFO] load model buffer 19.14%[INFO] load model buffer 20.61%[INFO] load model buffer 22.09%[INFO] load model buffer 23.56%[INFO] load model buffer 25.03%[INFO] load model buffer 26.50%[INFO] load model buffer 27.98%[INFO] load model buffer 29.45%[INFO] load model buffer 30.92%[INFO] load model buffer 32.39%[INFO] load model buffer 33.87%[INFO] load model buffer 35.34%[INFO] load model buffer 36.81%[INFO] load model buffer 38.28%[INFO] load model buffer 39.76%[INFO] load model buffer 41.23%[INFO] load model buffer 42.70%[INFO] load model buffer 44.17%[INFO] load model buffer 45.65%[INFO] load model buffer 47.12%[INFO] load model buffer 48.59%[INFO] load model buffer 50.06%[INFO] load model buffer 51.54%[INFO] load model buffer 53.01%[INFO] load model buffer 54.48%[INFO] load model buffer 55.95%[INFO] load model buffer 57.43%[INFO] load model buffer 58.90%[INFO] load model buffer 60.37%[INFO] load model buffer 61.84%[INFO] load model buffer 63.32%[INFO] load model buffer 64.79%[INFO] load model buffer 66.26%[INFO] load model buffer 67.73%[INFO] load model buffer 69.21%[INFO] load model buffer 70.68%[INFO] load model buffer 72.15%[INFO] load model buffer 73.62%[INFO] load model buffer 75.10%[INFO] load model buffer 76.57%[INFO] load model buffer 78.04%[INFO] load model buffer 79.51%[INFO] load model buffer 80.99%[INFO] load model buffer 82.46%[INFO] load model buffer 83.93%[INFO] load model buffer 85.40%[INFO] load model buffer 86.88%[INFO] load model buffer 88.35%[INFO] load model buffer 89.82%[INFO] load model buffer 91.29%[INFO] load model buffer 92.77%[INFO] load model buffer 94.24%[INFO] load model buffer 95.71%[INFO] load model buffer 97.18%[INFO] load model buffer 98.66%[INFO] load model buffer 100.00%
+[INFO] load model from memory, please wait a monment...
+[INFO] load model duration:  0.8281443119049072
+[INFO] get model desc
+[INFO] init success
+[Benchmark] 模型加载完成
+[Benchmark] Warmup (1 轮)...
+[Benchmark] Warmup 完成
+[Benchmark] 开始测试 (3 轮)...
+  Prompt: '请详细介绍一下机器学习的基本概念和常用算法'
+  Max tokens: 30
+  轮 1: TTFT=153.9ms, TPOT=10.1ms, generated=30 tokens
+  轮 2: TTFT=153.8ms, TPOT=9.2ms, generated=30 tokens
+  轮 3: TTFT=154.1ms, TPOT=9.2ms, generated=30 tokens
+
+======================================================================
+ Benchmark Results: v0_baseline
+======================================================================
+
+轮次     TTFT(ms)     TPOT(ms)     Decode(tok/s)  生成tokens  
+------------------------------------------------------------
+1      153.93       10.07        99.3           30        
+2      153.83       9.19         108.9          30        
+3      154.07       9.21         108.6          30        
+------------------------------------------------------------
+
+  输入长度:          16 tokens
+  平均生成长度:      30 tokens
+  测试轮次:          3
+
+  ┌─────────────────────────────────────────┐
+  │ TTFT (首字延迟):       153.94 ms        │
+  │ TPOT (每token):          9.49 ms        │
+  │ Prefill 速度:           103.9 tokens/s  │
+  │ Decode 速度:            105.6 tokens/s  │
+  │ 总吞吐量:               107.3 tokens/s  │
+  └─────────────────────────────────────────┘
+
+  TTFT 标准差:       ±0.10 ms
+  TPOT 标准差:       ±0.41 ms
+
+[INFO] free input and output buffer
+[INFO] acl reset device
+[INFO] acl finalize
+[INFO] destory context

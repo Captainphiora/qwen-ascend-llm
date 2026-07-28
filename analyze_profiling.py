@@ -9,11 +9,48 @@ import os
 import csv
 import sys
 
-PROF_DIR = "./profiling_data"
+PROF_BASE_DIR = "./profiling_data"
+PROF_DIR = None
+
+
+def select_prof_dir():
+    """查找 PROF_* 目录，多个时提示用户选择"""
+    global PROF_DIR
+    prof_dirs = []
+    for root, dirs, files in os.walk(PROF_BASE_DIR):
+        for d in dirs:
+            if d.startswith("PROF_"):
+                prof_dirs.append(os.path.join(root, d))
+    prof_dirs.sort()
+
+    if not prof_dirs:
+        print(f"[ERROR] 在 {PROF_BASE_DIR} 下找不到 PROF_* 目录")
+        print("请先运行: python profile_inference.py && bash run_profiling.sh --parse")
+        sys.exit(1)
+
+    if len(prof_dirs) == 1:
+        PROF_DIR = prof_dirs[0]
+    else:
+        print("[INFO] 发现多个 PROF_* 目录，请选择要分析的目录:")
+        for i, d in enumerate(prof_dirs):
+            print(f"  [{i + 1}] {d}")
+        print()
+        try:
+            choice = int(input(f"请输入编号 [1-{len(prof_dirs)}]: "))
+        except (ValueError, EOFError):
+            print("[ERROR] 无效的输入")
+            sys.exit(1)
+        if choice < 1 or choice > len(prof_dirs):
+            print(f"[ERROR] 无效的选择: {choice}")
+            sys.exit(1)
+        PROF_DIR = prof_dirs[choice - 1]
+
+    print(f"[INFO] 使用 profiling 数据: {PROF_DIR}")
+    print()
 
 
 def find_csv(pattern):
-    """在 profiling 目录中找到匹配的 CSV 文件"""
+    """在选定的 PROF 目录中找到匹配的 CSV 文件"""
     for root, dirs, files in os.walk(PROF_DIR):
         for f in files:
             if pattern in f and f.endswith(".csv"):
@@ -90,11 +127,12 @@ def analyze_api_statistic():
 
 
 def main():
-    if not os.path.exists(PROF_DIR):
-        print(f"[ERROR] profiling 数据目录不存在: {PROF_DIR}")
+    if not os.path.exists(PROF_BASE_DIR):
+        print(f"[ERROR] profiling 数据目录不存在: {PROF_BASE_DIR}")
         print("请先运行: python profile_inference.py")
         return
 
+    select_prof_dir()
     analyze_op_statistic()
     analyze_api_statistic()
 
