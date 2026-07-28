@@ -147,12 +147,14 @@ class ACLModel:
         ).reshape(1,-1)
         return mask, pos_id
 
+    # ACL后端kv_cache reset方式
     def reset(self):
         # 重置kv-cache
         self.input_pos=0
         self.real_kv_size=0
+
         ret = acl.rt.memset(
-            self.inputs[3]["buffer"], # 内存的起始地址。
+            self.inputs[3]["buffer"], # Device 内存地址（KV Cache 的输入 buffer）
             self.inputs[3]["size"], # 内存的最大长度，单位Byte。
             0,
             self.inputs[3]["size"] # 需要设置为指定值的内存长度，单位Byte。
@@ -344,12 +346,15 @@ class ACLModel:
         """
         start = time.time()
         acl.rt.set_context(self.context)
+        # kvcache不需要拷贝的意思？
         for i in range(len(input_data_list)):
             # 内存拷贝，忽略kv_cache，待会直接在device侧更新
+            # input_data_list : 分解后的prompt_len attention_mask position_ids
             input_data = input_data_list[i]
             input_size = input_data.size
             input_itemsize = input_data.itemsize
             bytes_data = input_data.tobytes()
+            # ptr是啥？
             np_ptr = acl.util.bytes_to_ptr(bytes_data)
             if is_dynamic:
                 input_copy_size = input_size * input_itemsize

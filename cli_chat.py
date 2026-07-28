@@ -32,7 +32,6 @@ SYSTEM_PROMPT = ""
 def parser_args():
     parser = argparse.ArgumentParser()
     
-    # 将 default 赋值为上方的全局变量
     parser.add_argument(
         '--hf_model_dir',
         type=str,

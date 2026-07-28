@@ -12,6 +12,7 @@ import torch
 
 
 
+# Inference类 负责tokenizer管理、对话模板、token采样和生成循环：
 class Inference:
     def __init__(self, config: InferenceConfig) -> None:
         self.max_input_length = config.max_input_length
@@ -121,7 +122,8 @@ class Inference:
             raise Exception(f"Unknown sampling method {sampling_method}")
 
         return next_token
-    
+
+    # 流式推理
     def stream_predict(
         self,
         prompt,
@@ -164,6 +166,7 @@ class Inference:
             self.sampling_method, sampling_value, temperature,
             (temperature == 0) or (self.sampling_method == "greedy")))
         print("[DEBUG] ---------------------------")
+        # acl和onnx推理tokenizer处理
         if self.session_type in ["onnx", "acl"]:
             input_ids = self.tokenizer(
                 [text], return_tensors="np"
@@ -197,13 +200,16 @@ class Inference:
                 if show_progress:
                     prefill_show_progress = True
                 # reset counter
+                # 清空device kvcache
                 self.session.reset()
             else:
                 prefill_show_progress = False
+            # 前向推理
             logits = self.session.run(
                 input_ids,
                 show_progress=prefill_show_progress,
             )
+            # 采样下一个token
             input_ids = self.sample_logits(
                 logits[0][-1:],
                 self.sampling_method,

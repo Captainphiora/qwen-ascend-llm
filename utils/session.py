@@ -45,6 +45,7 @@ class Session:
 class OnnxSession(Session):
     def __init__(self,config:InferenceConfig)->None:
         super().__init__(config)
+        # onnx kv_cache
         self.kv_cache = create_kv_cache(config)
         import onnxruntime
         options = onnxruntime.SessionOptions()
@@ -75,6 +76,7 @@ class OnnxSession(Session):
 class PyTorchSession(Session):
     def __init__(self, config: InferenceConfig) -> None:
         super().__init__(config)
+        # pytorch kv_cache
         self.kv_cache = create_kv_cache(config)
         from export.modeling_qwen2 import Qwen2ForCausalLM
         self.device_str = config.device_str
@@ -150,6 +152,7 @@ class AclSession(Session):
         self.model = ACLModel(config, self.context)
         self.max_batch = config.max_batch
         self.input_ids = np.zeros((1,16),dtype=np.int64)
+        # acl后端kv_cache完全驻留在Device内存中，不在host侧维护kv cache副本，分配、更新、清零全在devcie端完成
         # self.kv_cache = create_kv_cache(config)
         # self.kv_cache.kv_cache = self.model.kv_cache
         self.max_prefill_length = config.max_prefill_length
@@ -177,7 +180,7 @@ class AclSession(Session):
             self.close()
         except Exception:
             pass
-    
+    # 将一个数字分解成若干个2的指数的和
     def decompose_number(self, n, start_index=0):
         """
         将数字n分解成若干个2的指数的和，并返回这些2的指数构成的列表。
@@ -196,12 +199,14 @@ class AclSession(Session):
         return []
     
     def run(self, input_ids: np.ndarray, show_progress: bool = False):
+        # 
         seq_len = input_ids.shape[-1]
         logits = None
         is_prefill = True
         is_dynamic = bool(self.max_prefill_length > 1)
         # dynamic inference
         if is_dynamic:
+            # 动态推理时，将输入长度分解为若干个2的指数的和，然后依次处理每个分段
             seq_list = self.decompose_number(seq_len)
             if show_progress:
                seq_list = tqdm(seq_list, desc="prefill") 
@@ -239,6 +244,8 @@ class AclSession(Session):
         is_prefill: bool = False,
     ):
         self.run_times += seq_length 
+        # 获取输入的mask和position_ids
+        # 获取指定长度
         mask, pos_ids = self.model.get_inputs(seq_length)
         # print("=========================")
         # print("input_ids: ", input_ids)

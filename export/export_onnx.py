@@ -170,6 +170,7 @@ def export_onnx(
         "past_key_values"
     ]
     output_names = ["logits", "out_key_values"]
+    # 四个输入中，哪些维度需要动态，对于past_key_values 后两维分别是2*层数*头数，hidden_dim，不需要动态
     dynamic_axes = {
         "input_ids": {0: "batch_size", 1: "seq_length"},
         "attention_mask": {0: "batch_size", 1: "seq_length + kv_len"},
@@ -215,6 +216,7 @@ def export_onnx(
             args=input_args,
             input_names=input_names,
             output_names=output_names,
+            # 指定哪些维度是动态的
             dynamic_axes=dynamic_axes,
             do_constant_folding=False,
             opset_version=14,

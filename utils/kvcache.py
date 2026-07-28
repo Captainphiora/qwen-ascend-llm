@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from typing import Optional,Tuple,List
 from config import InferenceConfig
-# 对KV缓存和输出输出格式进行管理
+# 对KV缓存和输出格式进行管理
 class KVCacheManger:
     def __init__(self, config: InferenceConfig) -> None:
         self.num_key_value_heads = config.num_key_value_heads # head len
@@ -31,11 +31,15 @@ class KVCacheManger:
                 self.dtype=torch.float32
             else:
                 raise Exception("only support float16 and float32, not ", config.dtype)
+        # np.zeros
         if self.session_type == "onnx":
+            # CPU侧内存
             self.kv_cache = np.zeros(self.past_key_value_shape, dtype=self.dtype)
         elif self.session_type == "pytorch":
             self.kv_cache = torch.zeros(self.past_key_value_shape, dtype=self.dtype, device=self.device_str)
+        
         else:
+        # acl后端不在host侧维护kvcache副本，全在device端完成
             self.kv_cache = None
 
 

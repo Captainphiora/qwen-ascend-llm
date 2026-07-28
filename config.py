@@ -67,6 +67,7 @@ class InferenceConfig:
         self.past_key_value_shape = (
             self.max_batch,
             self.kv_cache_length,
+            # 28*2*2 = 112
             self.num_hidden_layers * 2 * self.num_key_value_heads,
             self.per_head_dim
         )
