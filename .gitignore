@@ -22,3 +22,5 @@ compare*
 math*
 *.om
 results*/
+profiling_output/
+profiling_data/

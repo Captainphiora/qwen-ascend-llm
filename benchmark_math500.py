@@ -93,24 +93,29 @@ def worker(device_id: int, items: list, result_path: str):
     engine.session.close()
 
 
-def load_finished_ids(path: str) -> set:
-    if not os.path.exists(path):
-        return set()
+def load_finished_ids(output_path: str) -> set:
     finished = set()
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                finished.add(json.loads(line)["unique_id"])
-            except Exception:
-                pass
+    # tmp_paths = [os.path.join(RESULT_DIR, f"_tmp_device_{i}.jsonl") for i in range(NUM_DEVICES)]
+
+
+    candidates = [output_path] + [os.path.join(RESULT_DIR, f"_tmp_device_{i}.jsonl") for i in range(NUM_DEVICES)]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    finished.add(json.loads(line)["unique_id"])
+                except Exception:
+                    pass
     return finished
 
 
 def main():
     # os.makedirs("results", exist_ok=True)
     os.makedirs(RESULT_DIR, exist_ok=True)
-    # dataset = load_dataset(DATASET_PATH)[:]
-    dataset = load_dataset(DATASET_PATH)[:8]
+    dataset = load_dataset(DATASET_PATH)[:]
+    # dataset = load_dataset(DATASET_PATH)[:24]
 
     finished_ids = load_finished_ids(OUTPUT_PATH)
     if finished_ids:

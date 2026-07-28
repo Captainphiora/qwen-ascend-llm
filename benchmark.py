@@ -1,394 +1,231 @@
 """
-Benchmark: TTFT / TPOT / Peak VRAM on Ascend 310B.
+性能基准测试脚本：测量 TTFT、TPOT、吞吐量等关键指标
+支持多轮测试取平均值，方便对比不同优化方案。
 
-Metrics:
-  - TTFT (Time To First Token): Time from input submission to first output token (s)
-  - TPOT (Time Per Output Token): Average time per decode token (ms)
-  - Peak VRAM: Maximum NPU memory usage during inference (MB)
+指标说明:
+  TTFT  (Time To First Token)  : 首字延迟，从输入到第一个token生成的时间
+  TPOT  (Time Per Output Token): 每个输出token的平均生成时间（不含首字）
+  Throughput                   : 总吞吐量 (tokens/sec)
+  Prefill Speed                : Prefill 阶段的处理速度 (tokens/sec)
 
-Output:
-  - Console formatted table
-  - CSV file at result/benchmark_result.csv
-
-Usage:
-  source /usr/local/Ascend/cann-9.0.0/set_env.sh
-  python benchmark.py --input_lengths 512 1024 2048 --decode_tokens 128 --num_rounds 1
+用法:
+  python benchmark.py
+  python benchmark.py --prompt "你好" --max_new_tokens 50 --rounds 3
+  python benchmark.py --label baseline
+  python benchmark.py --label optimized_rope --om_model_path ./output/model_opt/xxx.om
 """
 
-import os
-import sys
-import time
-import gc
-import csv
-import json
-import subprocess
 import argparse
-import threading
-from datetime import datetime
-import psutil
+import sys
+import os
+import time
 import numpy as np
+from dataclasses import dataclass
+from typing import List
 
-project_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_dir)
-
-from config import InferenceConfig
-from utils.inference import Inference
-
-
-# ======================== Memory Management ========================
-
-def clear_memory():
-    """Clear host memory: Python GC + kernel page cache."""
-    gc.collect()
-    gc.collect()
-    gc.collect()
-    try:
-        subprocess.run(
-            ["bash", "-c", "sync && echo 3 > /proc/sys/vm/drop_caches"],
-            timeout=5, capture_output=True
-        )
-    except Exception:
-        pass
-    time.sleep(0.5)
+# ============================================================
+# 默认配置
+# ============================================================
+DEFAULT_HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
+DEFAULT_OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om"
 
 
-def get_swap_mb():
-    return psutil.swap_memory().used / (1024**2)
+@dataclass
+class BenchmarkResult:
+    prompt_tokens: int = 0
+    generated_tokens: int = 0
+    ttft_ms: float = 0.0
+    tpot_ms: float = 0.0
+    total_time_ms: float = 0.0
+    prefill_speed: float = 0.0
+    decode_speed: float = 0.0
+    throughput: float = 0.0
 
 
-# ======================== NPU VRAM Monitoring ========================
-
-def get_npu_memory_mb():
-    """Read current NPU memory usage via npu-smi (MB)."""
-    try:
-        result = subprocess.run(
-            ["npu-smi", "info"], capture_output=True, text=True, timeout=5
-        )
-        for line in result.stdout.splitlines():
-            if "/" in line and "310B" not in line and "Version" not in line and "Hugepages" not in line:
-                parts = line.split()
-                for i, part in enumerate(parts):
-                    if part == "/":
-                        try:
-                            used = int(parts[i - 1])
-                            total = int(parts[i + 1])
-                            if total > 1000:
-                                return used
-                        except (ValueError, IndexError):
-                            pass
-    except Exception:
-        pass
-    return -1
-
-
-class VRAMMonitor:
-    """Background thread that polls NPU memory and tracks peak usage."""
-
-    def __init__(self, interval_s=0.3):
-        self.interval = interval_s
-        self.peak_mb = 0
-        self._running = False
-        self._thread = None
-
-    def start(self):
-        self.peak_mb = get_npu_memory_mb()
-        self._running = True
-        self._thread = threading.Thread(target=self._poll, daemon=True)
-        self._thread.start()
-
-    def _poll(self):
-        while self._running:
-            mem = get_npu_memory_mb()
-            if mem > self.peak_mb:
-                self.peak_mb = mem
-            time.sleep(self.interval)
-
-    def stop(self):
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=2)
-        mem = get_npu_memory_mb()
-        if mem > self.peak_mb:
-            self.peak_mb = mem
-        return self.peak_mb
-
-
-# ======================== Benchmark Core ========================
-
-def build_prompt(target_tokens, tokenizer):
-    """Build a prompt that tokenizes to approximately target_tokens length."""
-    base = (
-        "Please write a very long and detailed story about a programmer who "
-        "discovers an ancient computer in a cave. The computer contains the "
-        "secrets of an advanced civilization. Describe every detail of their "
-        "journey, the technology they find, and how it changes the world. "
-        "Include dialogue, descriptions of places, and technical details. "
+def run_single_benchmark(infer_engine, session, prompt, max_new_tokens) -> BenchmarkResult:
+    """执行单次推理并测量性能指标"""
+    messages = [{"role": "user", "content": prompt}]
+    text = infer_engine.tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
     )
-    repeated = base * (target_tokens // 30 + 1)
-    tokens = tokenizer([repeated], return_tensors="np")["input_ids"]
-    actual_len = tokens.shape[1]
-    if actual_len > target_tokens:
-        words = repeated.split()
-        ratio = target_tokens / actual_len
-        word_count = int(len(words) * ratio)
-        repeated = " ".join(words[:word_count])
-    return repeated
+    input_ids = infer_engine.tokenizer(
+        [text], return_tensors="np"
+    )["input_ids"].astype(np.int64).reshape(1, -1)
+    input_ids = input_ids[:, -infer_engine.max_input_length:]
+
+    input_length = input_ids.shape[1]
+    max_output_len = min(infer_engine.max_output_length - input_length, max_new_tokens)
+
+    ids_list = []
+    current_input_ids = input_ids
+
+    t_start = time.perf_counter()
+    t_first_token = None
+
+    for i in range(max_output_len):
+        if i == 0:
+            session.reset()
+
+        logits = session.run(current_input_ids)
+
+        if i == 0:
+            t_first_token = time.perf_counter()
+
+        next_token = infer_engine.sample_logits(logits[0][-1:], "greedy", 0.95, 0)
+        next_token = next_token.reshape(1, -1)
+        token_id = next_token[0, 0]
+
+        if token_id == infer_engine.tokenizer.eos_token_id:
+            break
+
+        ids_list.append(int(token_id))
+        current_input_ids = next_token
+
+    t_end = time.perf_counter()
+
+    # 计算指标
+    result = BenchmarkResult()
+    result.prompt_tokens = input_length
+    result.generated_tokens = len(ids_list)
+    result.total_time_ms = (t_end - t_start) * 1000
+
+    if t_first_token:
+        result.ttft_ms = (t_first_token - t_start) * 1000
+        result.prefill_speed = input_length / (result.ttft_ms / 1000) if result.ttft_ms > 0 else 0
+
+    if result.generated_tokens > 1 and t_first_token:
+        decode_time = (t_end - t_first_token) * 1000
+        result.tpot_ms = decode_time / (result.generated_tokens - 1)
+        result.decode_speed = (result.generated_tokens - 1) / (decode_time / 1000)
+
+    if result.total_time_ms > 0:
+        result.throughput = (result.prompt_tokens + result.generated_tokens) / (result.total_time_ms / 1000)
+
+    return result
 
 
-def run_single_test(infer_engine, prompt, decode_tokens, vram_monitor, verbose=False):
-    """Run one inference pass and measure TTFT, TPOT, Peak VRAM."""
-    if verbose:
-        print(f"\n    {'─'*60}")
-        print(f"    [INPUT] ({len(prompt)} chars):")
-        if len(prompt) > 300:
-            print(f"    {prompt[:150]}")
-            print(f"    ... (省略 {len(prompt)-250} chars) ...")
-            print(f"    {prompt[-100:]}")
-        else:
-            print(f"    {prompt}")
-        print(f"    {'─'*60}")
+def print_results(results: List[BenchmarkResult], label: str = ""):
+    """打印性能结果"""
+    if not results:
+        return
 
-    vram_monitor.start()
-    swap_before = get_swap_mb()
-
-    ttft = 0
-    token_count = 0
-    decode_start = None
-    output_text = ""
-
-    for (new_text, ftl, ds, ts) in infer_engine.stream_predict(
-        prompt, history=[], do_speed_test=True, max_new_tokens=decode_tokens
-    ):
-        output_text += new_text
-        if token_count == 0:
-            ttft = ftl
-            decode_start = time.time()
-        token_count += 1
-
-    if decode_start and token_count > 1:
-        decode_duration_s = time.time() - decode_start
-        tpot_ms = (decode_duration_s / (token_count - 1)) * 1000
+    print()
+    print("=" * 70)
+    if label:
+        print(f" Benchmark Results: {label}")
     else:
-        tpot_ms = 0
+        print(" Benchmark Results")
+    print("=" * 70)
+    print()
 
-    peak_vram = vram_monitor.stop()
-    swap_after = get_swap_mb()
+    if len(results) > 1:
+        print(f"{'轮次':<6} {'TTFT(ms)':<12} {'TPOT(ms)':<12} {'Decode(tok/s)':<14} {'生成tokens':<10}")
+        print("-" * 60)
+        for i, r in enumerate(results):
+            print(f"{i+1:<6} {r.ttft_ms:<12.2f} {r.tpot_ms:<12.2f} {r.decode_speed:<14.1f} {r.generated_tokens:<10}")
+        print("-" * 60)
 
-    if verbose:
-        print(f"    [OUTPUT] ({token_count} tokens):")
-        if len(output_text) > 500:
-            print(f"    {output_text[:250]}")
-            print(f"    ... (省略) ...")
-            print(f"    {output_text[-150:]}")
-        else:
-            print(f"    {output_text}")
-        print(f"    {'─'*60}")
+    avg_ttft = np.mean([r.ttft_ms for r in results])
+    avg_tpot = np.mean([r.tpot_ms for r in results if r.tpot_ms > 0]) if any(r.tpot_ms > 0 for r in results) else 0
+    avg_decode_speed = np.mean([r.decode_speed for r in results if r.decode_speed > 0]) if any(r.decode_speed > 0 for r in results) else 0
+    avg_prefill_speed = np.mean([r.prefill_speed for r in results if r.prefill_speed > 0]) if any(r.prefill_speed > 0 for r in results) else 0
+    avg_throughput = np.mean([r.throughput for r in results])
+    prompt_tokens = results[0].prompt_tokens
+    avg_gen_tokens = np.mean([r.generated_tokens for r in results])
 
-    return {
-        "ttft_s": ttft,
-        "tpot_ms": tpot_ms,
-        "decode_speed": (1000.0 / tpot_ms) if tpot_ms > 0 else 0,
-        "peak_vram_mb": peak_vram,
-        "output_tokens": token_count,
-        "output_text": output_text,
-        "swap_before_mb": swap_before,
-        "swap_after_mb": swap_after,
-        "swap_delta_mb": swap_after - swap_before,
-    }
+    print()
+    print(f"  输入长度:          {prompt_tokens} tokens")
+    print(f"  平均生成长度:      {avg_gen_tokens:.0f} tokens")
+    print(f"  测试轮次:          {len(results)}")
+    print()
+    print(f"  ┌─────────────────────────────────────────┐")
+    print(f"  │ TTFT (首字延迟):   {avg_ttft:>10.2f} ms        │")
+    print(f"  │ TPOT (每token):    {avg_tpot:>10.2f} ms        │")
+    print(f"  │ Prefill 速度:      {avg_prefill_speed:>10.1f} tokens/s  │")
+    print(f"  │ Decode 速度:       {avg_decode_speed:>10.1f} tokens/s  │")
+    print(f"  │ 总吞吐量:          {avg_throughput:>10.1f} tokens/s  │")
+    print(f"  └─────────────────────────────────────────┘")
+    print()
 
+    if len(results) > 1:
+        std_ttft = np.std([r.ttft_ms for r in results])
+        std_tpot = np.std([r.tpot_ms for r in results if r.tpot_ms > 0]) if any(r.tpot_ms > 0 for r in results) else 0
+        print(f"  TTFT 标准差:       ±{std_ttft:.2f} ms")
+        print(f"  TPOT 标准差:       ±{std_tpot:.2f} ms")
+        print()
 
-# ======================== Main ========================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark: TTFT / TPOT / Peak VRAM on Ascend 310B")
-    parser.add_argument("--om_model_path", type=str,
-                        default="./output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_rectified.om",
-                        help="Path to compiled .om model file")
-    parser.add_argument("--hf_model_dir", type=str,
-                        default="/home/chenxinji/models/DeepSeek-R1-Distill-Qwen-1.5B",
-                        help="HuggingFace model dir (for tokenizer)")
-    parser.add_argument("--input_lengths", type=int, nargs="+", default=[512, 1024, 2048],
-                        help="Input prompt lengths in tokens to compare")
-    parser.add_argument("--decode_tokens", type=int, default=128,
-                        help="Max number of tokens to decode per test")
-    parser.add_argument("--num_rounds", type=int, default=1,
-                        help="Repetitions per input_length")
-    parser.add_argument("--num_warmup", type=int, default=0,
-                        help="Warmup inferences (0=disabled)")
-    parser.add_argument("--verbose", action="store_true",
-                        help="Print input prompt and output text for each test")
-    parser.add_argument("--output_dir", type=str, default="./result",
-                        help="Directory to save result CSV and JSON")
+    parser = argparse.ArgumentParser(description="LLM 推理性能基准测试")
+    parser.add_argument("--prompt", type=str, default="请详细介绍一下机器学习的基本概念",
+                        help="测试 prompt")
+    parser.add_argument("--max_new_tokens", type=int, default=30,
+                        help="最大生成 token 数")
+    parser.add_argument("--rounds", type=int, default=3,
+                        help="测试轮数")
+    parser.add_argument("--warmup", type=int, default=1,
+                        help="预热轮数")
+    parser.add_argument("--om_model_path", type=str, default=DEFAULT_OM_MODEL_PATH,
+                        help="OM 模型路径")
+    parser.add_argument("--hf_model_dir", type=str, default=DEFAULT_HF_MODEL_DIR,
+                        help="HuggingFace 模型目录")
+    parser.add_argument("--kv_cache_length", type=int, default=4096)
+    parser.add_argument("--max_prefill_length", type=int, default=1)
+    parser.add_argument("--label", type=str, default="",
+                        help="本次测试标签 (如 'baseline' / 'optimized_rope')")
     args = parser.parse_args()
 
-    kv_cache_length = 4096
-    os.makedirs(args.output_dir, exist_ok=True)
+    from config import InferenceConfig
+    from utils.inference import Inference
+
+    print(f"[Benchmark] 配置:")
+    print(f"  OM模型: {args.om_model_path}")
+    print(f"  max_prefill_length: {args.max_prefill_length}")
+    print(f"  kv_cache_length: {args.kv_cache_length}")
+    print(f"[Benchmark] 加载模型...")
 
     config = InferenceConfig(
         hf_model_dir=args.hf_model_dir,
         om_model_path=args.om_model_path,
         onnx_model_path="",
         session_type="acl",
+        device_id=0,
         max_batch=1,
-        max_input_length=kv_cache_length - 1,
-        max_output_length=kv_cache_length,
-        kv_cache_length=kv_cache_length,
-        max_prefill_length=1,
+        max_input_length=4095,
+        max_output_length=4096,
+        kv_cache_length=args.kv_cache_length,
+        max_prefill_length=args.max_prefill_length,
         dtype="float16",
-        temperature=0.6,
+        torch_dtype="float16",
+        device_str="npu",
+        temperature=0,
+        sampling_method="greedy",
+        sampling_value=0.95,
         system_prompt="",
     )
-
-    # ---- Header ----
-    print("=" * 72)
-    print("BENCHMARK: DeepSeek-R1-Distill-Qwen-1.5B on Ascend 310B (NPU)")
-    print("=" * 72)
-    print(f"  Model          : {os.path.basename(args.om_model_path)}")
-    print(f"  KV Cache       : {kv_cache_length}")
-    print(f"  Input lengths  : {args.input_lengths} tokens")
-    print(f"  Decode tokens  : {args.decode_tokens}")
-    print(f"  Rounds         : {args.num_rounds}")
-    print(f"  Warmup         : {args.num_warmup}")
-    print(f"  Temperature    : 0.6")
-    print(f"  RAM            : {psutil.virtual_memory().total / (1024**3):.1f} GB")
-    print(f"  Swap used      : {get_swap_mb():.0f} MB")
-    print(f"  NPU VRAM       : {get_npu_memory_mb()} MB / 11577 MB")
-    print("=" * 72)
-
-    # ---- Load ----
-    print("\nClearing memory...")
-    clear_memory()
-    print("Loading model...")
-    t0 = time.time()
     infer_engine = Inference(config)
-    load_time = time.time() - t0
-    print(f"Model loaded in {load_time:.1f}s | NPU VRAM={get_npu_memory_mb()}MB | Swap={get_swap_mb():.0f}MB")
+    session = infer_engine.session
+    print("[Benchmark] 模型加载完成")
 
-    # ---- Optional Warmup ----
-    if args.num_warmup > 0:
-        print(f"\nWarmup ({args.num_warmup} rounds)...")
-        for _ in range(args.num_warmup):
-            for _ in infer_engine.stream_predict(
-                "Hello", history=[], do_speed_test=False, max_new_tokens=8
-            ):
-                pass
-            infer_engine.session.reset()
-        print("Warmup done.")
+    # Warmup
+    print(f"[Benchmark] Warmup ({args.warmup} 轮)...")
+    for _ in range(args.warmup):
+        run_single_benchmark(infer_engine, session, "hello", 5)
+    print("[Benchmark] Warmup 完成")
 
-    # ---- Run Benchmarks ----
-    all_results = []
+    # 正式测试
+    print(f"[Benchmark] 开始测试 ({args.rounds} 轮)...")
+    print(f"  Prompt: {args.prompt!r}")
+    print(f"  Max tokens: {args.max_new_tokens}")
 
-    for input_len in args.input_lengths:
-        print(f"\n{'━'*72}")
-        print(f"  INPUT: {input_len} tokens → Decode max {args.decode_tokens} tokens")
-        print(f"{'━'*72}")
+    results = []
+    for i in range(args.rounds):
+        result = run_single_benchmark(infer_engine, session, args.prompt, args.max_new_tokens)
+        results.append(result)
+        print(f"  轮 {i+1}: TTFT={result.ttft_ms:.1f}ms, TPOT={result.tpot_ms:.1f}ms, "
+              f"generated={result.generated_tokens} tokens")
 
-        prompt = build_prompt(input_len, infer_engine.tokenizer)
-        actual_input_tokens = infer_engine.tokenizer(
-            [prompt], return_tensors="np"
-        )["input_ids"].shape[1]
-        print(f"  Actual input tokens: {actual_input_tokens}")
-
-        for rd in range(args.num_rounds):
-            clear_memory()
-            infer_engine.session.reset()
-
-            vram_mon = VRAMMonitor(interval_s=0.3)
-            result = run_single_test(
-                infer_engine, prompt, args.decode_tokens, vram_mon, verbose=args.verbose
-            )
-            result["input_len"] = actual_input_tokens
-            result["target_input_len"] = input_len
-            result["round"] = rd + 1
-
-            swap_flag = " [SWAP!]" if abs(result["swap_delta_mb"]) > 100 else ""
-            print(f"  Round {rd+1}: TTFT={result['ttft_s']:.3f}s | "
-                  f"TPOT={result['tpot_ms']:.1f}ms ({result['decode_speed']:.2f} tok/s) | "
-                  f"Peak VRAM={result['peak_vram_mb']}MB | "
-                  f"Output={result['output_tokens']} tokens{swap_flag}")
-
-            all_results.append(result)
-
-    # ---- Summary Table (for display) ----
-    print("\n" + "=" * 72)
-    print("RESULTS SUMMARY")
-    print("=" * 72)
-
-    # Group by input_len
-    header = (f"{'Input(tok)':<12} {'Output(tok)':<12} {'TTFT(s)':<10} "
-              f"{'TPOT(ms)':<10} {'Speed(tok/s)':<13} {'Peak VRAM(MB)':<15}")
-    print(f"\n{header}")
-    print("─" * 72)
-
-    summary_rows = []
-    for input_len in args.input_lengths:
-        group = [r for r in all_results if r["target_input_len"] == input_len]
-        ttfts = [r["ttft_s"] for r in group]
-        tpots = [r["tpot_ms"] for r in group if r["tpot_ms"] > 0]
-        speeds = [r["decode_speed"] for r in group if r["decode_speed"] > 0]
-        vrams = [r["peak_vram_mb"] for r in group if r["peak_vram_mb"] > 0]
-        out_toks = [r["output_tokens"] for r in group]
-
-        row = {
-            "input_tokens": input_len,
-            "output_tokens": int(np.mean(out_toks)) if out_toks else 0,
-            "ttft_s": np.mean(ttfts) if ttfts else 0,
-            "tpot_ms": np.mean(tpots) if tpots else 0,
-            "decode_speed": np.mean(speeds) if speeds else 0,
-            "peak_vram_mb": max(vrams) if vrams else 0,
-        }
-        summary_rows.append(row)
-
-        print(f"{row['input_tokens']:<12} {row['output_tokens']:<12} "
-              f"{row['ttft_s']:<10.3f} {row['tpot_ms']:<10.1f} "
-              f"{row['decode_speed']:<13.2f} {row['peak_vram_mb']:<15}")
-
-    print("─" * 72)
-
-    # ---- Save CSV ----
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_path = os.path.join(args.output_dir, f"benchmark_{timestamp}.csv")
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            "model", "input_tokens", "output_tokens",
-            "ttft_s", "tpot_ms", "decode_speed_tok_s", "peak_vram_mb",
-            "swap_delta_mb", "round"
-        ])
-        for r in all_results:
-            writer.writerow([
-                os.path.basename(args.om_model_path),
-                r["input_len"],
-                r["output_tokens"],
-                f"{r['ttft_s']:.4f}",
-                f"{r['tpot_ms']:.2f}",
-                f"{r['decode_speed']:.2f}",
-                r["peak_vram_mb"],
-                f"{r['swap_delta_mb']:.1f}",
-                r["round"],
-            ])
-    print(f"\nCSV saved: {csv_path}")
-
-    # ---- Save JSON (for programmatic use) ----
-    json_path = os.path.join(args.output_dir, f"benchmark_{timestamp}.json")
-    json_data = {
-        "model": os.path.basename(args.om_model_path),
-        "device": "Ascend 910",
-        "kv_cache_length": kv_cache_length,
-        "max_prefill_length": 1,
-        "temperature": 0.6,
-        "timestamp": timestamp,
-        "summary": summary_rows,
-        "detail": [{k: v for k, v in r.items() if k != "output_text"} for r in all_results],
-    }
-    with open(json_path, "w") as f:
-        json.dump(json_data, f, indent=2, ensure_ascii=False)
-    print(f"JSON saved: {json_path}")
-
-    print("\n" + "=" * 72)
-    print("BENCHMARK COMPLETE")
-    print("=" * 72)
+    print_results(results, label=args.label or os.path.basename(args.om_model_path))
 
 
 if __name__ == "__main__":
