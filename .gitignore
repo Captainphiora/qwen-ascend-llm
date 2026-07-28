@@ -1,0 +1,15 @@
+.idea
+.vscode
+download/
+output/
+inference/
+kernel_meta/
+*/__pycache__/
+__pycache__/
+./*/__pycache__/
+export/*.json
+fusion_result.json
+result/
+log/
+cann-9.0.0/
+miniconda3/

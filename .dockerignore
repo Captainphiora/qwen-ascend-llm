@@ -1,0 +1,27 @@
+# 排除不需要的大文件和目录
+.git
+.venv
+__pycache__
+*.pyc
+log/
+result/
+kernel_meta/
+output/onnx2_*
+download/
+skills/
+Dockerfile_dev
+uv.lock
+.python-version
+cann-9.0.0/
+
+# miniconda3 缓存
+miniconda3/pkgs/
+
+# 排除 safetensors 权重（只需要 tokenizer）
+models/DeepSeek-R1-Distill-Qwen-1.5B/model.safetensors
+models/DeepSeek-R1-Distill-Qwen-1.5B/figures/
+
+# 排除其他 om 模型（只保留目标 om）
+output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om
+output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_310b.om
+output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_310b_v2.om

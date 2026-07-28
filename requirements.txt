@@ -1,0 +1,13 @@
+onnx==1.16.1
+onnxruntime==1.15.1
+transformers==4.37.0
+onnxruntime-cann==1.23.2
+torch==2.1.0
+torch-npu==2.1.0.post6
+tqdm==4.68.4
+fastapi==0.125.0
+uvicorn==0.51.0
+sse_starlette==1.6.5
+pydantic==2.1.1
+openai==2.44.0
+numpy==1.26.4

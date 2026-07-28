@@ -1,0 +1,78 @@
+# ==============================================================================
+# Dockerfile: DeepSeek-R1-Distill-Qwen-1.5B on Ascend 310B
+#
+# 镜像包含：Miniconda(msit_compare)、om 模型、tokenizer
+# 运行时挂载：CANN 9.0.0 + 驱动（宿主机需已安装）
+# 构建时无需网络（所有依赖从宿主机直接拷贝）
+#
+# 构建：bash scripts/docker_build.sh
+# 运行：bash scripts/docker_run.sh
+# ==============================================================================
+
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# 基础系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates bash libgomp1 libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 设置时区
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# ============================================================
+# 拷贝宿主机 Miniconda（含 msit_compare 环境，约 4GB）
+# 构建时零网络依赖，所有 Python 包已预装
+# ============================================================
+COPY miniconda3 /usr/local/miniconda3
+
+ENV CONDA_DIR=/usr/local/miniconda3
+ENV PATH=${CONDA_DIR}/envs/msit_compare/bin:${CONDA_DIR}/bin:$PATH
+ENV CONDA_DEFAULT_ENV=msit_compare
+
+# ============================================================
+# CANN 9.0.0 通过运行时 -v 挂载，这里只预设环境变量
+# ============================================================
+ENV ASCEND_TOOLKIT_HOME=/usr/local/Ascend/cann-9.0.0
+ENV LD_LIBRARY_PATH=${ASCEND_TOOLKIT_HOME}/lib64:${ASCEND_TOOLKIT_HOME}/aarch64-linux/devlib
+ENV PYTHONPATH=${ASCEND_TOOLKIT_HOME}/python/site-packages:${ASCEND_TOOLKIT_HOME}/opp/built-in/op_impl/ai_core/tbe
+ENV PATH=${ASCEND_TOOLKIT_HOME}/bin:${ASCEND_TOOLKIT_HOME}/compiler/ccec_compiler/bin:$PATH
+ENV ASCEND_AICPU_PATH=${ASCEND_TOOLKIT_HOME}
+ENV ASCEND_OPP_PATH=${ASCEND_TOOLKIT_HOME}/opp
+ENV TOOLCHAIN_HOME=${ASCEND_TOOLKIT_HOME}/toolkit
+
+# ============================================================
+# 项目代码
+# ============================================================
+ENV APP_HOME=/opt/qwen-ascend-llm
+RUN mkdir -p ${APP_HOME}
+WORKDIR ${APP_HOME}
+
+# 拷贝源代码
+COPY utils ./utils
+COPY configs ./configs
+COPY scripts ./scripts
+COPY client ./client
+COPY export ./export
+COPY api.py server.py config.py cli_chat.py benchmark.py cleanup.py ./
+COPY requirements.txt pyproject.toml ./
+
+# 拷贝 om 模型（约 3.4GB）
+COPY output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om ./output/model/
+
+# 拷贝 tokenizer 和 model config（不含 safetensors 权重）
+COPY models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer.json ./models/DeepSeek-R1-Distill-Qwen-1.5B/
+COPY models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer_config.json ./models/DeepSeek-R1-Distill-Qwen-1.5B/
+COPY models/DeepSeek-R1-Distill-Qwen-1.5B/config.json ./models/DeepSeek-R1-Distill-Qwen-1.5B/
+COPY models/DeepSeek-R1-Distill-Qwen-1.5B/generation_config.json ./models/DeepSeek-R1-Distill-Qwen-1.5B/
+
+# 入口脚本
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh && chmod +x scripts/start_server.sh
+
+EXPOSE 8000
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["bash", "scripts/start_server.sh", "--config", "configs/deepseek_r1_1.5b_310_docker.json"]

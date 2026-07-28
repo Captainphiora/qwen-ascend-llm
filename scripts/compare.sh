@@ -1,0 +1,17 @@
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+HF_MODEL_DIR="/home/chenxinji/models/${MODEL_NAME}"
+
+KV_CACHE_LENGTH=4096
+MAX_PREFILL_LENGTH=1
+
+ONNX_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
+OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_310b.om"
+# python3 export/compare.py \
+python3 export/compare_bak.py \
+  --hf_model_dir=$HF_MODEL_DIR \
+  --onnx_model_path=$ONNX_MODEL_PATH \
+  --om_model_path=$OM_MODEL_PATH \
+  --kv_cache_length=$KV_CACHE_LENGTH \
+  --cpu_thread=1 \
+  --dtype="float16" \
+  --max_prefill_length=$MAX_PREFILL_LENGTH
