@@ -16,3 +16,9 @@ ge_check_op.json
 ops_info.json
 ops_info_new.json
 results/
+*.log
+*.jsonl
+compare*
+math*
+*.om
+results*/
