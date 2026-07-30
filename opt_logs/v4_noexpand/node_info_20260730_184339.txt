@@ -1,0 +1,26 @@
+Total nodes: 6096
+Unique op types: 23
+
+  Constant                             1929
+  Unsqueeze                            1494
+  Cast                                  344
+  Transpose                             339
+  Gather                                284
+  Add                                   253
+  MatMul                                253
+  Concat                                229
+  Mul                                   171
+  Reshape                               170
+  Shape                                 144
+  Div                                   141
+  Pow                                    57
+  ReduceMean                             57
+  Sqrt                                   57
+  Slice                                  56
+  NPURotaryPositionEmbedding             56
+  Softmax                                28
+  Sigmoid                                28
+  ConstantOfShape                         3
+  Trilu                                   1
+  Less                                    1
+  Where                                   1
