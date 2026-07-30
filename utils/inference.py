@@ -97,27 +97,31 @@ class Inference:
             assert sampling_value is not None
             logits = logits.astype(np.float32)
             logits /= temperature
-            probs = np.exp(logits) / np.sum(np.exp(logits))
-            sorted_probs = np.sort(probs)[:, ::-1]
-            sorted_indices = np.argsort(probs)[:, ::-1]
+            logits_max = np.max(logits, axis=-1, keepdims=True)
+            logits = logits - logits_max
+            probs = np.exp(logits)
+            probs /= np.sum(probs, axis=-1, keepdims=True)
 
             if sampling_method == "top_k":
                 index_of_interest = int(sampling_value)
+                top_indices = np.argpartition(probs[0], -index_of_interest)[-index_of_interest:]
+                top_probs = probs[0][top_indices]
+                top_probs /= np.sum(top_probs)
+                next_token = np.array([np.random.choice(top_indices, p=top_probs)])
             elif sampling_method == "top_p":
                 p = sampling_value
-                cumulative_probs = np.cumsum(sorted_probs, axis=-1)
-                for index_of_interest, cumulative_prob in enumerate(
-                    cumulative_probs[0]
-                ):
-                    if cumulative_prob > p:
-                        break
-
-            probs_of_interest = sorted_probs[:, : index_of_interest + 1]
-            indices_of_interest = sorted_indices[:, : index_of_interest + 1]
-            probs_of_interest /= np.sum(probs_of_interest)
-            next_token = np.array(
-                [np.random.choice(indices_of_interest[0], p=probs_of_interest[0])]
-            )
+                k_candidate = min(1000, probs.shape[-1])
+                top_k_indices = np.argpartition(probs[0], -k_candidate)[-k_candidate:]
+                top_k_probs = probs[0][top_k_indices]
+                sorted_order = np.argsort(top_k_probs)[::-1]
+                sorted_probs = top_k_probs[sorted_order]
+                sorted_indices = top_k_indices[sorted_order]
+                cumulative_probs = np.cumsum(sorted_probs)
+                cutoff = np.searchsorted(cumulative_probs, p) + 1
+                top_indices = sorted_indices[:cutoff]
+                top_probs = sorted_probs[:cutoff]
+                top_probs /= np.sum(top_probs)
+                next_token = np.array([np.random.choice(top_indices, p=top_probs)])
         else:
             raise Exception(f"Unknown sampling method {sampling_method}")
 
