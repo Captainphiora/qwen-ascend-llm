@@ -117,9 +117,17 @@ class Inference:
                 sorted_probs = top_k_probs[sorted_order]
                 sorted_indices = top_k_indices[sorted_order]
                 cumulative_probs = np.cumsum(sorted_probs)
-                cutoff = np.searchsorted(cumulative_probs, p) + 1
-                top_indices = sorted_indices[:cutoff]
-                top_probs = sorted_probs[:cutoff]
+                if cumulative_probs[-1] < p:
+                    sorted_indices_full = np.argsort(probs[0])[::-1]
+                    sorted_probs_full = probs[0][sorted_indices_full]
+                    cumulative_probs = np.cumsum(sorted_probs_full)
+                    cutoff = np.searchsorted(cumulative_probs, p) + 1
+                    top_indices = sorted_indices_full[:cutoff]
+                    top_probs = sorted_probs_full[:cutoff]
+                else:
+                    cutoff = np.searchsorted(cumulative_probs, p) + 1
+                    top_indices = sorted_indices[:cutoff]
+                    top_probs = sorted_probs[:cutoff]
                 top_probs /= np.sum(top_probs)
                 next_token = np.array([np.random.choice(top_indices, p=top_probs)])
         else:
