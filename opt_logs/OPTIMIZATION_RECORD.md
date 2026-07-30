@@ -68,6 +68,14 @@ bash run_rope_optimize.sh --version v0_baseline \
 - 同时保留 Trilu/Cast 修复
 - 节点数: 8673 → 8337 (减少 336 节点)
 
+**效果分析:**
+- RoPE 融合消除了每层 Q/K 的 `2×Slice + Neg + Concat` 共 4 个算子 (×56 = 224 节点)
+- StridedSliceD 从 4872 次降至 1624 次 (消除了 RoPE 相关的 3248 次 Slice)
+- ConcatD 从 3277 次降至 1653 次 (消除了 RoPE rotate_half 的 1624 次 Concat)
+- Neg 算子完全消除 (原 1624 次, 1.78ms)
+- 新增 RotaryPositionEmbedding 融合算子 1624 次, 耗时 6.19ms (平均 3.8us/次)
+- 算子总耗时减少 7.28ms (3.0%), 但端到端 TPOT 仅提升 0.8%, 因为融合算子本身也有开销
+
 **复现命令:**
 ```bash
 bash run_rope_optimize.sh --version v1_rope \
@@ -124,6 +132,15 @@ bash run_rope_optimize.sh --version v2_kvcache \
     --change_node change_node_v2_kvcache.py \
     --device_id 5
 ```
+
+**效果分析:**
+- 张量 shape 变化: `[1, kv_len, 112, 128]` → permute+view → `[1, 28, 4, kv_len, 128]`
+- 每层用 Gather(常量索引) 替代原来对 112-head 维度的大范围 StridedSlice
+- StridedSliceD: 48.94ms → 37.61ms (仍有 1624 次, 来自 K/V 拆分的小维度 slice, 但单次耗时从 10us 变为 23us 因为 shape 变了)
+- ConcatD: 20.42ms → 7.25ms (**-64.5%**), 因为 concat 的输入从 112-head 大张量变为 4-head 小张量
+- 代价: GatherV2 从 2.51ms (1653次) 增加到 8.54ms (2465次), 增加约 6ms, 这是 per-layer 索引带来的开销
+- 净收益: 算子总耗时从 241.13ms 降至 225.46ms, 减少 15.67ms (6.5%)
+- 端到端: Decode 速度 112.1 → 116.6 tok/s, 提升 4.0%; TTFT 150.0 → 146.7ms, 改善 2.2%
 
 ## 目录结构
 
