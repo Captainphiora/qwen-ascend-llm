@@ -23,7 +23,7 @@
 #   --benchmark_rounds  benchmark 轮数 (默认: 3)
 # ============================================================
 
-set -e
+set -eo pipefail
 
 # ============================================================
 # 默认参数
@@ -45,6 +45,7 @@ SKIP_OM=false
 SKIP_PROFILING=false
 SKIP_BENCHMARK=false
 ONNX_INPUT=""
+MODELING_FILE="modeling_qwen2.py"
 
 # ============================================================
 # 解析命令行参数
@@ -67,6 +68,7 @@ while [[ $# -gt 0 ]]; do
         --hf_model_dir) HF_MODEL_DIR="$2"; shift 2 ;;
         --model_name) MODEL_NAME="$2"; shift 2 ;;
         --conda_env) CONDA_ENV="$2"; shift 2 ;;
+        --modeling_file) MODELING_FILE="$2"; shift 2 ;;
         *) echo "[ERROR] 未知参数: $1"; exit 1 ;;
     esac
 done
@@ -125,9 +127,11 @@ echo ""
 # 环境激活
 # ============================================================
 echo "[Env] 激活环境..."
+set +e
 source /root/miniconda3/etc/profile.d/conda.sh
 conda activate "$CONDA_ENV"
 source ~/.bashrc_cann900
+set -eo pipefail
 echo ""
 
 # ============================================================
@@ -141,10 +145,13 @@ if [ "$SKIP_EXPORT" = true ]; then
     fi
 else
     echo "[Step 1] PyTorch → ONNX 导出..."
+    echo "[Step 1] 使用 modeling 文件: $MODELING_FILE"
+    cp "$WORK_DIR/export/$MODELING_FILE" "$WORK_DIR/export/modeling_qwen2.py"
     python "$WORK_DIR/export/export_onnx.py" \
         --hf_model_dir "$HF_MODEL_DIR" \
         --onnx_model_path "$ONNX_RAW_PATH" \
         --kv_cache_length "$KV_CACHE_LENGTH" \
+        --device_str npu \
         --dtype float16 \
         --simplify false \
         2>&1 | tee "$DIR_LOGS/$VERSION/export_onnx_${TIMESTAMP}.log"
@@ -169,7 +176,9 @@ op_counts = {}
 for node in model.graph.node:
     op_counts[node.op_type] = op_counts.get(node.op_type, 0) + 1
 total = len(model.graph.node)
+unique = len(op_counts)
 print(f'Total nodes: {total}')
+print(f'Unique op types: {unique}')
 print()
 for op, cnt in sorted(op_counts.items(), key=lambda x: -x[1]):
     print(f'  {op:<35} {cnt:>5}')

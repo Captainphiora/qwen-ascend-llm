@@ -1,0 +1,11 @@
+Device_id,Level,API Name,Time(us),Count,Avg(us),Min(us),Max(us),Variance
+host,model,InputCopy,112.28,29,3.872,1.27,9.51,5.294
+host,model,ModelExecute,233688.59,29,8058.227,8032.76,8095.42,248.124
+host,model,ModelLoad,599039.3,1,599039.3,599039.3,599039.3,0
+host,model,OutputCopy,22.38,29,0.772,0.17,1.81,0.153
+host,acl,aclmdlExecute,235345.31,29,8115.356,8078.87,8179.12,769.287
+host,acl,aclrtMemcpy,8249.47,136,60.658,10.52,1933.18,27974.914
+host,acl,aclrtMemset,16173.14,1,16173.14,16173.14,16173.14,0
+host,acl,aclrtSetCurrentContext,124.49,29,4.293,0.43,14.51,15.946
+host,node,launch,7576.84,742,10.211,3.76,1102.04,1717.918
+host,node,step_info,698.86,58,12.049,6.48,32.41,32.201

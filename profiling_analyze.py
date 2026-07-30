@@ -54,7 +54,10 @@ def analyze_op_statistic(prof_dir):
         return lines
 
     total_time = sum(float(r.get("Total Time(us)", 0)) for r in rows)
+    total_count = sum(int(r.get("Count", 0)) for r in rows)
 
+    lines.append(f" 算子类型数: {len(rows)}, 算子调用总次数: {total_count}")
+    lines.append("")
     lines.append(
         f"{'算子类型':<30} {'核心':<16} {'次数':>6} {'总耗时(ms)':>10} {'占比':>8} {'平均(us)':>10}"
     )
