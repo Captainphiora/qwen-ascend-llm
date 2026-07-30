@@ -79,16 +79,13 @@ class Inference:
         """
         对logits做采样，得到下一个token
         Args:
-            logits (np.ndarray): 
-            sampling_method (str, optional):  采样方法，默认是"greedy"，支持top_p, top_k
-            sampling_value (float, optional): _description_. Defaults to None.
-            temperature (float, optional): _description_. Defaults to 1.0.
-
-        Raises:
-            Exception: _description_
+            logits (np.ndarray): shape [1, vocab_size]
+            sampling_method (str, optional): 采样方法，"greedy"/"top_p"/"top_k"
+            sampling_value (float, optional): top_p 的 p 值或 top_k 的 k 值
+            temperature (float, optional): 温度参数，0 表示 greedy
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: 下一个 token id
         """
         if temperature == 0 or sampling_method == "greedy":
             next_token = np.argmax(logits, axis=-1).astype(np.int64)
@@ -97,17 +94,17 @@ class Inference:
             assert sampling_value is not None
             logits = logits.astype(np.float32)
             logits /= temperature
-            logits_max = np.max(logits, axis=-1, keepdims=True)
-            logits = logits - logits_max
+            logits -= np.max(logits, axis=-1, keepdims=True)
             probs = np.exp(logits)
             probs /= np.sum(probs, axis=-1, keepdims=True)
 
             if sampling_method == "top_k":
-                index_of_interest = int(sampling_value)
-                top_indices = np.argpartition(probs[0], -index_of_interest)[-index_of_interest:]
+                top_k = int(sampling_value)
+                top_indices = np.argpartition(probs[0], -top_k)[-top_k:]
                 top_probs = probs[0][top_indices]
                 top_probs /= np.sum(top_probs)
                 next_token = np.array([np.random.choice(top_indices, p=top_probs)])
+
             elif sampling_method == "top_p":
                 p = sampling_value
                 k_candidate = min(1000, probs.shape[-1])
@@ -119,15 +116,12 @@ class Inference:
                 cumulative_probs = np.cumsum(sorted_probs)
                 if cumulative_probs[-1] < p:
                     sorted_indices_full = np.argsort(probs[0])[::-1]
-                    sorted_probs_full = probs[0][sorted_indices_full]
-                    cumulative_probs = np.cumsum(sorted_probs_full)
-                    cutoff = np.searchsorted(cumulative_probs, p) + 1
-                    top_indices = sorted_indices_full[:cutoff]
-                    top_probs = sorted_probs_full[:cutoff]
-                else:
-                    cutoff = np.searchsorted(cumulative_probs, p) + 1
-                    top_indices = sorted_indices[:cutoff]
-                    top_probs = sorted_probs[:cutoff]
+                    sorted_probs = probs[0][sorted_indices_full]
+                    cumulative_probs = np.cumsum(sorted_probs)
+                    sorted_indices = sorted_indices_full
+                cutoff = int(np.searchsorted(cumulative_probs, p)) + 1
+                top_indices = sorted_indices[:cutoff]
+                top_probs = sorted_probs[:cutoff]
                 top_probs /= np.sum(top_probs)
                 next_token = np.array([np.random.choice(top_indices, p=top_probs)])
         else:
