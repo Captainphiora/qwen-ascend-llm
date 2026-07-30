@@ -1,0 +1,27 @@
+Total nodes: 8337
+
+  Constant                             2799
+  Unsqueeze                            1942
+  Shape                                 424
+  Gather                                424
+  Cast                                  344
+  Transpose                             339
+  Concat                                285
+  Mul                                   283
+  Add                                   253
+  MatMul                                253
+  Reshape                               225
+  Div                                   141
+  Slice                                 112
+  ConstantOfShape                        59
+  Where                                  57
+  Pow                                    57
+  ReduceMean                             57
+  Sqrt                                   57
+  NPURotaryPositionEmbedding             56
+  Equal                                  56
+  Expand                                 56
+  Softmax                                28
+  Sigmoid                                28
+  Trilu                                   1
+  Less                                    1

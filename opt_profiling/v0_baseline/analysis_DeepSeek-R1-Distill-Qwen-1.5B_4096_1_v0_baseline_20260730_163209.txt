@@ -1,0 +1,50 @@
+================================================================================
+ Profiling 分析报告
+ 模型: DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v0_baseline
+ 时间: 2026-07-30 16:35:25
+ 设备: Device 5
+ 数据: /mnt/host-model/cxj/qwen-ascend-llm/opt_profiling/v0_baseline/raw_20260730_163209/PROF_000001_20260730163514020_00655657ARAJCGBQ
+================================================================================
+
+================================================================================
+ 算子耗时统计 (op_statistic)
+================================================================================
+ 文件: /mnt/host-model/cxj/qwen-ascend-llm/opt_profiling/v0_baseline/raw_20260730_163209/PROF_000001_20260730163514020_00655657ARAJCGBQ/mindstudio_profiler_output/op_statistic_20260730163524.csv
+
+算子类型                           核心                   次数    总耗时(ms)       占比     平均(us)
+------------------------------------------------------------------------------------------
+BatchMatMulV2                  AI_CORE            7337     138.77    57.5%     18.913
+StridedSliceD                  AI_VECTOR_CORE     4872      48.94    20.3%     10.045
+ConcatD                        AI_VECTOR_CORE     3277      20.42     8.5%      6.230
+Expand                         AI_VECTOR_CORE     1624      11.54     4.8%      7.106
+Add                            AI_VECTOR_CORE     2436       5.63     2.3%      2.311
+AutomaticBufferFusionOp        AI_VECTOR_CORE     2494       4.26     1.8%      1.708
+Transpose                      AI_VECTOR_CORE       29       3.86     1.6%    133.227
+SoftmaxV2                      AI_VECTOR_CORE      812       2.82     1.2%      3.477
+GatherV2                       AI_VECTOR_CORE     1653       2.51     1.0%      1.519
+Neg                            AI_VECTOR_CORE     1624       1.78     0.7%      1.097
+Cast                           AI_VECTOR_CORE      116       0.41     0.2%      3.571
+SelectV2                       AI_VECTOR_CORE       29       0.06     0.0%      1.937
+Tril                           AI_VECTOR_CORE       29       0.04     0.0%      1.376
+Mul                            AI_VECTOR_CORE       29       0.04     0.0%      1.337
+Square                         AI_VECTOR_CORE       29       0.04     0.0%      1.326
+------------------------------------------------------------------------------------------
+总计                                                         241.13   100.0%
+
+================================================================================
+ ACL API 调用统计 (api_statistic)
+================================================================================
+ 文件: /mnt/host-model/cxj/qwen-ascend-llm/opt_profiling/v0_baseline/raw_20260730_163209/PROF_000001_20260730163514020_00655657ARAJCGBQ/mindstudio_profiler_output/api_statistic_20260730163524.csv
+
+API 名称                   调用次数      总耗时(ms)     平均(ms)     最大(ms)
+----------------------------------------------------------------------
+InputCopy                  29         0.09      0.003      0.008
+ModelExecute               29       248.07      8.554      8.828
+ModelLoad                   1       640.99    640.990    640.990
+OutputCopy                 29         0.02      0.001      0.002
+aclmdlExecute              29       249.90      8.617      8.937
+aclrtMemcpy               136         5.68      0.042      0.200
+aclrtMemset                 1        16.44     16.444     16.444
+aclrtSetCurrentContext       29         0.11      0.004      0.013
+launch                    910         6.04      0.007      0.278
+step_info                  58         0.69      0.012      0.106
