@@ -17,18 +17,21 @@
 |------|-----------|------|-------------|------|-------------|
 | v0_baseline | 241.13ms | 8.92ms | 112.1 tok/s | 150.0ms | — |
 | v1_rope | 233.85ms | 8.85ms | 112.9 tok/s | 150.5ms | +0.7% |
-| v2_kvcache | 225.46ms | 8.57ms | 116.6 tok/s | 146.7ms | **+4.0%** |
+| v2_kvcache | 225.46ms | 8.57ms | 116.6 tok/s | 146.7ms | +4.0% |
+| v3_kvcache_noslice | **202.92ms** | **7.62ms** | **131.3 tok/s** | **129.8ms** | **+17.1%** |
 
 ### 关键算子对比
 
-| 算子 | v0_baseline | v1_rope | v2_kvcache |
-|------|-------------|---------|------------|
-| BatchMatMulV2 | 138.77ms (7337次) | 142.67ms (7337次) | 138.60ms (7337次) |
-| StridedSliceD | 48.94ms (4872次) | 41.81ms (1624次) | 37.61ms (1624次) |
-| ConcatD | 20.42ms (3277次) | 13.83ms (1653次) | 7.25ms (1653次) |
-| Neg | 1.78ms (1624次) | 消除 | 消除 |
-| RotaryPositionEmbedding | — | 6.19ms (1624次) | 6.02ms (1624次) |
-| GatherV2 | 2.51ms (1653次) | 2.46ms (1653次) | 8.54ms (2465次) |
+| 算子 | v0_baseline | v1_rope | v2_kvcache | v3_kvcache_noslice |
+|------|-------------|---------|------------|--------------------|
+| BatchMatMulV2 | 138.77ms (7337次) | 142.67ms (7337次) | 138.60ms (7337次) | 145.46ms (7337次) |
+| StridedSliceD | 48.94ms (4872次) | 41.81ms (1624次) | 37.61ms (1624次) | **消除** |
+| ConcatD | 20.42ms (3277次) | 13.83ms (1653次) | 7.25ms (1653次) | 7.33ms (1653次) |
+| Neg | 1.78ms (1624次) | 消除 | 消除 | 消除 |
+| RotaryPositionEmbedding | — | 6.19ms (1624次) | 6.02ms (1624次) | 5.96ms (1624次) |
+| GatherV2 | 2.51ms (1653次) | 2.46ms (1653次) | 8.54ms (2465次) | 16.32ms (4089次) |
+| Expand | 11.54ms (1624次) | 11.01ms (1624次) | 11.63ms (1624次) | 11.61ms (1624次) |
+| Transpose | 3.86ms (29次) | 3.87ms (29次) | 3.95ms (29次) | 3.89ms (29次) |
 
 ## 各版本方案说明
 
@@ -142,6 +145,62 @@ bash run_rope_optimize.sh --version v2_kvcache \
 - 净收益: 算子总耗时从 241.13ms 降至 225.46ms, 减少 15.67ms (6.5%)
 - 端到端: Decode 速度 112.1 → 116.6 tok/s, 提升 4.0%; TTFT 150.0 → 146.7ms, 改善 2.2%
 
+### v3_kvcache_noslice（完全消除 StridedSliceD + RoPE 融合）
+
+**使用文件:**
+- modeling: `export/modeling_qwen2_v3_kvcache_noslice.py`
+- change_node: `export/change_node_v3_kvcache_noslice.py`
+
+**做法:**
+
+1. **KV Cache 6D 重构** (modeling 层面):
+   - 在 v2 基础上进一步将 5D `[1, num_layers, 2*num_kv_heads, kv_len, head_dim]` 拆解为 6D `[1, num_layers, 2, num_kv_heads, kv_len, head_dim]`
+   - 每层 K 通过 `past_key_value[:, self.layer_idx, 0]` 获取 (Gather 常量索引)
+   - 每层 V 通过 `past_key_value[:, self.layer_idx, 1]` 获取 (Gather 常量索引)
+   - 完全消除 StridedSliceD — 不再需要任何维度上的 Slice 操作
+
+2. **RoPE 融合** (change_node 层面):
+   - 同 v1_rope/v2, 56 个 RoPE pattern 替换为 NPURotaryPositionEmbedding
+
+**关键代码改动 (`modeling_qwen2_v3_kvcache_noslice.py`):**
+
+Qwen2Model.forward() 中:
+```python
+# v2 的 5D:
+past_key_values = past_key_values.permute(0, 2, 1, 3)
+past_key_values = past_key_values.view(1, num_layers, 2 * num_kv_heads, -1, head_dim)
+# v3 改为 6D:
+past_key_values = past_key_values.permute(0, 2, 1, 3)
+past_key_values = past_key_values.view(1, num_layers, 2, num_kv_heads, -1, head_dim)
+```
+
+Qwen2Attention.forward() 中:
+```python
+# v2 (仍需小维度 Slice):
+layer_kv = past_key_value[:, self.layer_idx]
+cache_key = layer_kv[:, :self.num_key_value_heads]
+cache_value = layer_kv[:, self.num_key_value_heads:]
+# v3 (纯 Gather, 无 Slice):
+cache_key = past_key_value[:, self.layer_idx, 0]
+cache_value = past_key_value[:, self.layer_idx, 1]
+```
+
+**复现命令 (需要重新导出 ONNX):**
+```bash
+bash run_rope_optimize.sh --version v3_kvcache_noslice \
+    --modeling_file modeling_qwen2_v3_kvcache_noslice.py \
+    --change_node change_node_v3_kvcache_noslice.py \
+    --device_id 5
+```
+
+**效果分析:**
+- 张量 shape 变化: `[1, kv_len, 112, 128]` → permute+view → `[1, 28, 2, 2, kv_len, 128]`
+- StridedSliceD: 37.61ms (v2) → **完全消除** (v3), 节省 37.61ms
+- 代价: GatherV2 从 8.54ms (2465次) 增加到 16.32ms (4089次), 增加约 8ms
+- 净收益: 算子总耗时从 241.13ms 降至 202.92ms, 减少 38.21ms (**-15.8%**)
+- 端到端: Decode 速度 112.1 → 131.3 tok/s (**+17.1%**); TTFT 150.0 → 129.8ms (**-13.5%**)
+- ONNX 节点数: 8673 (baseline) → 7888 (v3), 减少 785 节点
+
 ## 目录结构
 
 ```
@@ -164,9 +223,21 @@ opt_logs/<version>/            # 日志
   └── node_info_*.txt          # ONNX 节点统计
 ```
 
-## 剩余瓶颈
+## 剩余瓶颈 (v3_kvcache_noslice)
 
-- `BatchMatMulV2` 占 61.5% — 主体计算, 无法通过图优化压缩
-- `StridedSliceD` 37.61ms (16.7%) — 来自每层 K/V 拆分 (小维度 4-head 的 slice)
-- `Expand` 11.63ms (5.2%) — repeat_kv 中的广播扩展
-- `Transpose` 3.95ms (1.8%) — 29次调用但单次耗时 136us, 异常偏高
+| 算子 | 耗时 | 占比 | 来源 |
+|------|------|------|------|
+| BatchMatMulV2 | 145.46ms | 71.7% | QKV投影 + Attention + FFN, 主体计算 |
+| GatherV2 | 16.32ms | 8.0% | per-layer KV cache 索引 (4089次) |
+| Expand | 11.61ms | 5.7% | repeat_kv 中 GQA 广播 (num_kv_heads → num_heads) |
+| ConcatD | 7.33ms | 3.6% | KV cache 拼接 (cat(cache, new_kv), dim=seq) |
+| RotaryPositionEmbedding | 5.96ms | 2.9% | 融合后的 RoPE 算子 |
+| Add | 5.73ms | 2.8% | 残差连接 |
+| Transpose | 3.89ms | 1.9% | 注意力头维度变换 (29次, 单次 134us) |
+
+### 可能的进一步优化方向
+
+- **Expand (5.7%)**: 来自 `repeat_kv` 将 2 个 KV head 广播到 12 个 attention head (GQA)。可考虑在 attention 计算中直接用 broadcasting 替代显式 expand, 或用自定义融合算子将 repeat_kv + MatMul 合并
+- **ConcatD (3.6%)**: KV cache 的 seq 维度拼接无法消除 (必须把新 token 的 KV 和历史 cache 拼起来), 除非改用 in-place scatter 写入 (需要改 OM 模型输入输出协议)
+- **Transpose (1.9%)**: 29 次调用但单次 134us 异常偏高, 可能是大张量转置。考虑在 modeling 层面调整 layout 避免不必要的 transpose
+- **GatherV2 (8.0%)**: 这是 v3 引入的 tradeoff, 用 Gather 替代 Slice。4089 次 / 29步 = 141 次/步, 来自每层 2 次 Gather (layer_idx + K/V) × 28层 + 额外的 RoPE cos/sin Gather。单次 4us 已经较快, 优化空间有限
