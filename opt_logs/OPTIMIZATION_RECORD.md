@@ -19,19 +19,20 @@
 | v1_rope | 233.85ms | 8.85ms | 112.9 tok/s | 150.5ms | +0.7% |
 | v2_kvcache | 225.46ms | 8.57ms | 116.6 tok/s | 146.7ms | +4.0% |
 | v3_kvcache_noslice | **202.92ms** | **7.62ms** | **131.3 tok/s** | **129.8ms** | **+17.1%** |
+| v4_noexpand | **182.48ms** | **7.11ms** | **140.7 tok/s** | **122.4ms** | **+25.5%** |
 
 ### 关键算子对比
 
 | 算子 | v0_baseline | v1_rope | v2_kvcache | v3_kvcache_noslice |
 |------|-------------|---------|------------|--------------------|
-| BatchMatMulV2 | 138.77ms (7337次) | 142.67ms (7337次) | 138.60ms (7337次) | 145.46ms (7337次) |
-| StridedSliceD | 48.94ms (4872次) | 41.81ms (1624次) | 37.61ms (1624次) | **消除** |
-| ConcatD | 20.42ms (3277次) | 13.83ms (1653次) | 7.25ms (1653次) | 7.33ms (1653次) |
-| Neg | 1.78ms (1624次) | 消除 | 消除 | 消除 |
-| RotaryPositionEmbedding | — | 6.19ms (1624次) | 6.02ms (1624次) | 5.96ms (1624次) |
-| GatherV2 | 2.51ms (1653次) | 2.46ms (1653次) | 8.54ms (2465次) | 16.32ms (4089次) |
-| Expand | 11.54ms (1624次) | 11.01ms (1624次) | 11.63ms (1624次) | 11.61ms (1624次) |
-| Transpose | 3.86ms (29次) | 3.87ms (29次) | 3.95ms (29次) | 3.89ms (29次) |
+| BatchMatMulV2 | 138.77ms (7337次) | 142.67ms (7337次) | 138.60ms (7337次) | 145.46ms (7337次) | 138.29ms (7337次) |
+| StridedSliceD | 48.94ms (4872次) | 41.81ms (1624次) | 37.61ms (1624次) | **消除** | **消除** |
+| ConcatD | 20.42ms (3277次) | 13.83ms (1653次) | 7.25ms (1653次) | 7.33ms (1653次) | 7.39ms (1653次) |
+| Neg | 1.78ms (1624次) | 消除 | 消除 | 消除 | 消除 |
+| RotaryPositionEmbedding | — | 6.19ms (1624次) | 6.02ms (1624次) | 5.96ms (1624次) | 5.90ms (1624次) |
+| GatherV2 | 2.51ms (1653次) | 2.46ms (1653次) | 8.54ms (2465次) | 16.32ms (4089次) | 15.68ms (4089次) |
+| Expand | 11.54ms (1624次) | 11.01ms (1624次) | 11.63ms (1624次) | 11.61ms (1624次) | **消除** |
+| Transpose | 3.86ms (29次) | 3.87ms (29次) | 3.95ms (29次) | 3.89ms (29次) | 3.86ms (29次) |
 
 ## 各版本方案说明
 
@@ -201,6 +202,54 @@ bash run_rope_optimize.sh --version v3_kvcache_noslice \
 - 端到端: Decode 速度 112.1 → 131.3 tok/s (**+17.1%**); TTFT 150.0 → 129.8ms (**-13.5%**)
 - ONNX 节点数: 8673 (baseline) → 7888 (v3), 减少 785 节点
 
+### v4_noexpand（GQA Broadcast 消除 Expand + 继承 v3 全部优化）
+
+**使用文件:**
+- modeling: `export/modeling_qwen2_v4_noexpand.py`
+- change_node: `export/change_node_v4_noexpand.py`
+
+**做法:**
+
+1. **GQA Broadcast 替代 repeat_kv** (modeling 层面):
+   - 原来: `repeat_kv` 将 K/V 从 `[1, 2, kv_len, 128]` expand 为 `[1, 12, kv_len, 128]`, 产生 Expand 算子
+   - 现在: Q reshape 为 `[1, 2, 6, q_len, 128]` (分组视图), K/V unsqueeze 为 `[1, 2, 1, kv_len, 128]`
+   - MatMul 自动 broadcast: `[1,2,6,q,128] × [1,2,1,128,kv] → [1,2,6,q,kv]`
+   - 完全消除 Expand 算子, 不产生任何额外数据拷贝
+
+2. **继承 v3 全部优化**: 6D KV Cache (消除 StridedSliceD) + RoPE 融合
+
+**关键代码改动 (`modeling_qwen2_v4_noexpand.py`):**
+
+```python
+# 原来 (repeat_kv + 标准 matmul):
+key_states = repeat_kv(key_states, self.num_key_value_groups)      # expand [1,2,kv,128]→[1,12,kv,128]
+value_states = repeat_kv(value_states, self.num_key_value_groups)
+attn_weights = torch.matmul(Q / sqrt(d), key_states.transpose(2,3))
+
+# 现在 (grouped broadcast):
+query_states = query_states.view(bsz, self.num_key_value_heads, self.num_key_value_groups, q_len, self.head_dim)
+key_states = key_states.unsqueeze(2)        # [1, 2, 1, kv_len, 128]
+value_states = value_states.unsqueeze(2)    # [1, 2, 1, kv_len, 128]
+attn_weights = torch.matmul(Q / sqrt(d), key_states.transpose(3, 4))  # broadcast
+attn_output = torch.matmul(attn_weights, value_states)
+attn_output = attn_output.view(bsz, self.num_heads, q_len, self.head_dim)  # reshape back
+```
+
+**复现命令:**
+```bash
+bash run_rope_optimize.sh --version v4_noexpand \
+    --modeling_file modeling_qwen2_v4_noexpand.py \
+    --change_node change_node_v4_noexpand.py \
+    --device_id 5
+```
+
+**效果分析:**
+- Expand: 11.61ms (v3) → **完全消除** (v4)
+- ONNX 节点数: 7888 (v3) → 6096 (v4), 减少 1792 节点
+- 算子总耗时: 202.92ms (v3) → 182.48ms (v4), 又减少 20.44ms (**-10.1%**)
+- 端到端: Decode 131.3 → 140.7 tok/s (**+7.2%**); TTFT 129.8 → 122.4ms (**-5.7%**)
+- 相比 baseline 累计: Decode 112.1 → 140.7 tok/s (**+25.5%**); TTFT 150.0 → 122.4ms (**-18.4%**)
+
 ## 目录结构
 
 ```
@@ -223,21 +272,21 @@ opt_logs/<version>/            # 日志
   └── node_info_*.txt          # ONNX 节点统计
 ```
 
-## 剩余瓶颈 (v3_kvcache_noslice)
+## 剩余瓶颈 (v4_noexpand)
 
 | 算子 | 耗时 | 占比 | 来源 |
 |------|------|------|------|
-| BatchMatMulV2 | 145.46ms | 71.7% | QKV投影 + Attention + FFN, 主体计算 |
-| GatherV2 | 16.32ms | 8.0% | per-layer KV cache 索引 (4089次) |
-| Expand | 11.61ms | 5.7% | repeat_kv 中 GQA 广播 (num_kv_heads → num_heads) |
-| ConcatD | 7.33ms | 3.6% | KV cache 拼接 (cat(cache, new_kv), dim=seq) |
-| RotaryPositionEmbedding | 5.96ms | 2.9% | 融合后的 RoPE 算子 |
-| Add | 5.73ms | 2.8% | 残差连接 |
-| Transpose | 3.89ms | 1.9% | 注意力头维度变换 (29次, 单次 134us) |
+| BatchMatMulV2 | 138.29ms | 75.8% | QKV投影 + Attention + FFN, 主体计算 |
+| GatherV2 | 15.68ms | 8.6% | per-layer KV cache 索引 (4089次) |
+| ConcatD | 7.39ms | 4.1% | KV cache 拼接 (cat(cache, new_kv), dim=seq) |
+| RotaryPositionEmbedding | 5.90ms | 3.2% | 融合后的 RoPE 算子 |
+| Add | 5.69ms | 3.1% | 残差连接 |
+| Transpose | 3.86ms | 2.1% | 注意力头维度变换 (29次, 单次 133us) |
+| SoftmaxV2 | 2.09ms | 1.1% | Attention softmax |
 
 ### 可能的进一步优化方向
 
-- **Expand (5.7%)**: 来自 `repeat_kv` 将 2 个 KV head 广播到 12 个 attention head (GQA)。可考虑在 attention 计算中直接用 broadcasting 替代显式 expand, 或用自定义融合算子将 repeat_kv + MatMul 合并
-- **ConcatD (3.6%)**: KV cache 的 seq 维度拼接无法消除 (必须把新 token 的 KV 和历史 cache 拼起来), 除非改用 in-place scatter 写入 (需要改 OM 模型输入输出协议)
-- **Transpose (1.9%)**: 29 次调用但单次 134us 异常偏高, 可能是大张量转置。考虑在 modeling 层面调整 layout 避免不必要的 transpose
-- **GatherV2 (8.0%)**: 这是 v3 引入的 tradeoff, 用 Gather 替代 Slice。4089 次 / 29步 = 141 次/步, 来自每层 2 次 Gather (layer_idx + K/V) × 28层 + 额外的 RoPE cos/sin Gather。单次 4us 已经较快, 优化空间有限
+- **BatchMatMulV2 (75.8%)**: 已占绝对主导, 属于 compute-bound。可考虑量化 (INT8/INT4) 或 FlashAttention 融合来降低
+- **GatherV2 (8.6%)**: 6D reshape 引入的索引开销, 4089次/29步≈141次/步。优化空间有限
+- **ConcatD (3.6%)**: KV cache seq 维拼接, 不改 OM 协议无法消除
+- **Transpose (2.1%)**: 29 次调用单次 133us, 可能通过调整 layout 避免
