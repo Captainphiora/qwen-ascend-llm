@@ -10,6 +10,12 @@ from config import InferenceConfig
 from tqdm import trange, tqdm
 import torch
 
+try:
+    import torch_npu
+    HAS_TORCH_NPU = True
+except (ImportError, RuntimeError):
+    HAS_TORCH_NPU = False
+
 
 
 # Inference类 负责tokenizer管理、对话模板、token采样和生成循环：
@@ -38,6 +44,19 @@ class Inference:
         # self.prompt=config.prompt
         self.kv_cache_length = config.kv_cache_length
         self.state: dict = {"code":200,"isEnd":False,"message":""}
+        self.use_npu_sampling = (
+            HAS_TORCH_NPU and config.session_type == "acl"
+        )
+        if self.use_npu_sampling:
+            npu_device = f"npu:{config.device_id}"
+            torch.npu.set_device(npu_device)
+            self.npu_sampling_device = npu_device
+            self._npu_top_k_greedy = torch.tensor(
+                [1], dtype=torch.int32, device=npu_device
+            )
+            self._npu_top_p_skip = torch.tensor(
+                [1.0], dtype=torch.float16, device=npu_device
+            )
         self.reset()
         self.lock = Lock()
         self.first = True
@@ -78,12 +97,8 @@ class Inference:
     ) -> np.ndarray:
         """
         对logits做采样，得到下一个token。
-        参考 vllm-ascend 的 TopkToppSampling 思路在 CPU 侧实现：
-        - greedy: fp32 argmax (numpy 对 fp16 argmax 无优化，先转 fp32 快 3x)
-        - top_k: argpartition(O(n)) 取 top-k → 局部 softmax → multinomial
-        - top_p: argpartition(O(n)) 取候选集 → 降序排列 → cumsum 截断 → multinomial
-        与 vllm-ascend 区别: vllm-ascend 全程在 NPU 上用 triton kernel 完成，
-        本实现因 AclSession 已将 logits 拷回 CPU，故用 numpy 最优算法。
+        优先使用 NPU ATB 算子 (torch_npu.npu_top_k_top_p_sample)，
+        回退到 CPU numpy 实现。
 
         Args:
             logits (np.ndarray): shape [1, vocab_size], float16 or float32
@@ -92,7 +107,81 @@ class Inference:
             temperature (float, optional): 温度参数，0 表示 greedy
 
         Returns:
-            np.ndarray: 下一个 token id, shape [1] or [1,]
+            np.ndarray: 下一个 token id
+        """
+        if self.use_npu_sampling:
+            return self._sample_logits_npu(
+                logits, sampling_method, sampling_value, temperature
+            )
+        return self._sample_logits_cpu(
+            logits, sampling_method, sampling_value, temperature
+        )
+
+    def _sample_logits_npu(
+        self,
+        logits: np.ndarray,
+        sampling_method: str,
+        sampling_value: float,
+        temperature: float,
+    ) -> np.ndarray:
+        """
+        NPU ATB 采样: 使用 torch_npu.npu_top_k_top_p_sample
+        greedy 使用 CPU argmax (避免无意义的 H2D 数据搬移),
+        top_k/top_p 使用 NPU 算子加速。
+        """
+        if temperature == 0 or sampling_method == "greedy":
+            if logits.dtype != np.float32:
+                logits = logits.astype(np.float32)
+            return np.argmax(logits, axis=-1).astype(np.int64)
+
+        logits_t = torch.from_numpy(np.ascontiguousarray(logits)).to(
+            self.npu_sampling_device
+        )
+        if logits_t.dtype != torch.float16:
+            logits_t = logits_t.half()
+        logits_t = logits_t / temperature
+
+        if sampling_method == "top_k":
+            top_k = int(sampling_value)
+            top_k_t = torch.tensor(
+                [min(top_k, 1024)], dtype=torch.int32, device=self.npu_sampling_device
+            )
+            top_p_t = self._npu_top_p_skip
+            q = torch.rand(
+                1, logits_t.shape[-1],
+                dtype=torch.float32, device=self.npu_sampling_device
+            )
+            idx, _ = torch_npu.npu_top_k_top_p_sample(
+                logits_t, top_k_t, top_p_t, q
+            )
+        elif sampling_method == "top_p":
+            top_k_t = torch.tensor(
+                [100], dtype=torch.int32, device=self.npu_sampling_device
+            )
+            top_p_t = torch.tensor(
+                [sampling_value], dtype=torch.float16, device=self.npu_sampling_device
+            )
+            q = torch.rand(
+                1, logits_t.shape[-1],
+                dtype=torch.float32, device=self.npu_sampling_device
+            )
+            idx, _ = torch_npu.npu_top_k_top_p_sample(
+                logits_t, top_k_t, top_p_t, q
+            )
+        else:
+            raise Exception(f"Unknown sampling method {sampling_method}")
+
+        return idx.cpu().numpy().flatten()
+
+    def _sample_logits_cpu(
+        self,
+        logits: np.ndarray,
+        sampling_method: str,
+        sampling_value: float,
+        temperature: float,
+    ) -> np.ndarray:
+        """
+        CPU numpy 采样 (fallback)。
         """
         if temperature == 0 or sampling_method == "greedy":
             if logits.dtype != np.float32:
