@@ -78,22 +78,25 @@ class Inference:
     ) -> np.ndarray:
         """
         对logits做采样，得到下一个token。
-        参考 vLLM/Transformers 的思路，但针对 CPU 侧 numpy 做了优化：
-        - greedy: np.argmax
-        - top_k: argpartition 取 top-k 后局部 softmax + random.choice
-        - top_p: argpartition 取 top-100 候选后累积概率截断 + random.choice
-          (避免全量 softmax 和全量 sort，在 CPU 上比 torch.sort 快 30x+)
+        参考 vllm-ascend 的 TopkToppSampling 思路在 CPU 侧实现：
+        - greedy: fp32 argmax (numpy 对 fp16 argmax 无优化，先转 fp32 快 3x)
+        - top_k: argpartition(O(n)) 取 top-k → 局部 softmax → multinomial
+        - top_p: argpartition(O(n)) 取候选集 → 降序排列 → cumsum 截断 → multinomial
+        与 vllm-ascend 区别: vllm-ascend 全程在 NPU 上用 triton kernel 完成，
+        本实现因 AclSession 已将 logits 拷回 CPU，故用 numpy 最优算法。
 
         Args:
-            logits (np.ndarray): shape [1, vocab_size]
+            logits (np.ndarray): shape [1, vocab_size], float16 or float32
             sampling_method (str, optional): 采样方法，"greedy"/"top_p"/"top_k"
             sampling_value (float, optional): top_p 的 p 值或 top_k 的 k 值
             temperature (float, optional): 温度参数，0 表示 greedy
 
         Returns:
-            np.ndarray: 下一个 token id
+            np.ndarray: 下一个 token id, shape [1] or [1,]
         """
         if temperature == 0 or sampling_method == "greedy":
+            if logits.dtype != np.float32:
+                logits = logits.astype(np.float32)
             next_token = np.argmax(logits, axis=-1).astype(np.int64)
 
         elif sampling_method == "top_k" or sampling_method == "top_p":
