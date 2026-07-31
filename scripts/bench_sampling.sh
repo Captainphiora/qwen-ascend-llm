@@ -94,7 +94,7 @@ if [ "$RUN_BENCH" = true ]; then
         --max_new_tokens $MAX_NEW_TOKENS \
         --rounds $ROUNDS \
         --warmup $WARMUP \
-        2>&1 | grep -v "EE9999\|107002\|107003\|ctx is NULL\|context is empty\|function operator\|StreamDestroy\|DeviceSynchronize\|npuSynchronize\|TraceBack\|compiler_depend\|rtGetDevMsg\|Check whether\|Solution: 1" | tee -a "$OUTPUT_FILE"
+        2>&1 | tee -a "$OUTPUT_FILE"
 
     echo "" | tee -a "$OUTPUT_FILE"
 fi
@@ -108,7 +108,7 @@ if [ "$RUN_PROF" = true ]; then
         $COMMON_ARGS \
         --prompt \"$PROMPT\" \
         --max_new_tokens $MAX_NEW_TOKENS \
-        2>&1 | grep -v "EE9999\|107002\|107003\|ctx is NULL\|context is empty\|function operator\|StreamDestroy\|DeviceSynchronize\|npuSynchronize\|TraceBack\|compiler_depend\|rtGetDevMsg\|Check whether\|Solution: 1" | tee -a "$OUTPUT_FILE"
+        2>&1 | tee -a "$OUTPUT_FILE"
 
     echo "" | tee -a "$OUTPUT_FILE"
 fi
@@ -130,7 +130,7 @@ if [ "$RUN_ACL_PROF" = true ]; then
         --sampling_method greedy \
         --use_msprof \
         --profiling_dir "$PROFILING_DIR" \
-        2>&1 | grep -v "EE9999\|107002\|107003\|ctx is NULL\|context is empty\|function operator\|StreamDestroy\|DeviceSynchronize\|npuSynchronize\|TraceBack\|compiler_depend\|rtGetDevMsg\|Check whether\|Solution: 1" | tee -a "$OUTPUT_FILE"
+        2>&1 | tee -a "$OUTPUT_FILE"
 
     echo "" | tee -a "$OUTPUT_FILE"
 
