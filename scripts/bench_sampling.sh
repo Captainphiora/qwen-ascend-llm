@@ -193,6 +193,17 @@ if [ "$RUN_ACL_PROF" = true ]; then
             echo "┌── Host 侧 ACL API 耗时统计 ────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
             head -21 "$API_STAT" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -21 "$API_STAT" | tee -a "$OUTPUT_FILE"
             echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
+
+            # 提取数据搬运 (H2D/D2H) 相关统计
+            echo "" | tee -a "$OUTPUT_FILE"
+            echo "┌── 数据搬运 (H2D/D2H) 耗时统计 ─────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
+            echo "  (从 api_statistic 中提取 Memcpy/Copy 相关条目)" | tee -a "$OUTPUT_FILE"
+            echo "" | tee -a "$OUTPUT_FILE"
+            # 表头
+            head -1 "$API_STAT" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -1 "$API_STAT" | tee -a "$OUTPUT_FILE"
+            # Memcpy 相关行
+            grep -i "memcpy\|MemCopy\|InputCopy\|OutputCopy\|Copy" "$API_STAT" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || grep -i "memcpy\|MemCopy\|InputCopy\|OutputCopy\|Copy" "$API_STAT" | tee -a "$OUTPUT_FILE"
+            echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
         fi
 
         echo "" | tee -a "$OUTPUT_FILE"
