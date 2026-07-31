@@ -169,3 +169,90 @@ source ~/.bashrc_cann900
 - 所有优化均不修改 `utils/engine.py`（推理引擎），只修改导出阶段的 modeling 文件和 ONNX 后处理脚本
 - OM 模型的输入输出 shape 保持不变：`past_key_values: [1, 4096, 112, 128]`，engine 中的 memcpy 逻辑无需改动
 - 310B 和 910 共享同一份 `onnx_raw`（由 `modeling_qwen2_v4_noexpand.py` 导出），区别仅在 change_node 阶段和 ATC 的 `--soc_version` 参数
+
+## 采样（Sampling）性能优化
+
+### 问题背景
+
+原始 `sample_logits` 在 `utils/inference.py` 中使用 numpy 实现 top_p 采样，存在严重性能问题：
+top_p 每 token 耗时 **15.7ms**，而 greedy 仅 **0.98ms**（16x 差距）。对于 310B 这种弱算力设备，采样开销可能接近甚至超过模型推理本身。
+
+### 根因分析
+
+| 瓶颈 | 原因 | 影响 |
+|------|------|------|
+| 全量 softmax（152K vocab） | 对整个词表做 exp + sum，O(n) 但常数大 | ~1.5ms |
+| argpartition(k=1000) | 候选集过大，实际 p=0.8 只需 ~10 个 token | ~2ms |
+| fp16 argmax（greedy） | numpy 对 float16 无 SIMD 优化路径 | 0.98ms vs 0.31ms |
+
+### 优化方案（参考 vllm-ascend / Transformers / MindIE）
+
+#### 主流框架对比
+
+| 框架 | 采样位置 | 实现方式 |
+|------|---------|---------|
+| HuggingFace Transformers | GPU | `torch.sort` + `cumsum` + `masked_fill` + `multinomial` |
+| vLLM (GPU) | GPU | FlashInfer CUDA kernel 或 PyTorch fallback |
+| vllm-ascend (NPU) | NPU | triton-ascend kernel，全程不离开 NPU |
+| MindIE (NPU) | NPU | CANN ATB `TopkToppSamplingOperation` 融合算子 |
+| **本项目** | **CPU** | numpy argpartition + 局部 softmax（因 AclSession 已将 logits 拷回 CPU） |
+
+#### 为什么本项目用 numpy 而非 torch
+
+因为 `AclSession.run()` 将 logits 从 NPU 拷回 CPU 为 numpy 数组，采样发生在 Host 侧。在 CPU 上：
+- `torch.sort`（O(n log n)）对 152K 词表需 **69ms**——极慢
+- `np.argpartition`（O(n) 平均）仅需 **1.35ms**——快 50 倍
+- 主流框架的 torch 实现仅在 GPU/NPU 上有并行优势
+
+#### 最终实现（已提交）
+
+```
+greedy:  fp16→fp32 cast + np.argmax        → 0.31ms/token
+top_k:   argpartition(k) + 局部softmax     → 1.7ms/token  
+top_p:   argpartition(100) + sort(100) + cumsum截断 → 1.8ms/token
+```
+
+核心思路（与 vllm-ascend/MindIE ATB 算子一致）：
+1. **先 top-k 筛选候选集**（argpartition, k=100），将 152K 词表缩减到 100 候选
+2. **在候选集内做 top-p 截断**（局部 sort + cumsum），仅对 100 个元素操作
+3. **Fallback 机制**：若 top-100 累积概率不足 p，扩大到 k=1000 重试
+
+### 性能对比
+
+| 方法 | 优化前 | 优化后 | 提速 |
+|------|--------|--------|------|
+| Greedy | 0.98ms | **0.31ms** | 3.2x |
+| Top-k (k=50) | ~2ms | **1.7ms** | 已最优 |
+| Top-p (p=0.8) | 15.7ms | **1.8ms** | 8.7x |
+
+### 310B 适配说明
+
+**当前代码无需修改即可在 310B 上运行**，原因：
+
+1. 310B NPU 不支持 fp32，但采样发生在 ARM CPU（TAISHANV200M），CPU 支持 fp32 运算
+2. OM 模型输出 logits 为 fp16，通过 D2H memcpy 拷回 Host 后仍为 `np.float16`
+3. 代码中 `logits.astype(np.float32)` 在 ARM CPU 上执行，功能正确
+
+**310B 上的性能预期：**
+
+310B ARM CPU（1.6GHz, 4 核）相比 x86 服务器较弱，预计：
+- argpartition 在 310B 上可能需要 5-15ms（x86 上 1.35ms）
+- 若模型 decode 速度为 ~30-50ms/token（310B NPU），采样开销占比约 10-30%
+- 如果采样成为瓶颈，进一步优化方向见下方
+
+### 进一步优化方向（如 310B CPU 采样成为瓶颈）
+
+| 方向 | 描述 | 难度 |
+|------|------|------|
+| NPU 侧采样 | 不拷回 logits，在 NPU 上调用 ATB `TopkToppSamplingOperation`，仅回传 1 个 token id | 高 |
+| 减少 D2H 拷贝量 | 在 NPU 上先做 argmax/topk，只拷回少量数据 | 中 |
+| 降低 k_candidate | 将 top-100 降为 top-50（对 p≤0.9 通常足够） | 低 |
+| ARM NEON 优化 | 用 Cython/Numba 对 argpartition 做 SIMD 加速 | 中 |
+
+### 相关 Git 提交
+
+```
+728ee30 perf: greedy采样优化 - fp16转fp32后argmax (0.98ms→0.31ms, 3.2x提速)
+b5d9546 perf: 采样优化最终方案 - numpy argpartition+局部softmax (1.7ms/token, 比torch.sort快30x+)
+1e980b7 perf: 优化top_p采样 - 避免全量softmax, 减少k_candidate (17ms→2.3ms/token)
+```
