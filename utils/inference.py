@@ -2,6 +2,7 @@ import numpy as np
 import os
 import time
 import gc
+import atexit
 from transformers import AutoTokenizer
 from enum import Enum
 from threading import Lock
@@ -15,6 +16,18 @@ try:
     HAS_TORCH_NPU = True
 except (ImportError, RuntimeError):
     HAS_TORCH_NPU = False
+
+
+def _cleanup_torch_npu():
+    """在 ACL context 销毁前, 先清理 torch_npu 资源."""
+    if HAS_TORCH_NPU:
+        try:
+            torch.npu.synchronize()
+            torch.npu.empty_cache()
+        except Exception:
+            pass
+
+atexit.register(_cleanup_torch_npu)
 
 
 

@@ -247,7 +247,7 @@ class ACLModel:
         print("\r[INFO] load model buffer 100.00%")
         gc.collect()
         st = time.time()
-        print("[INFO] load model from memory, please wait a monment...")
+        print("[INFO] load model from memory, please wait a moment...")
         self.model_id, ret = acl.mdl.load_from_mem(model_buffer, model_buffer_size)
         check_ret("load model",ret)
         et = time.time()
@@ -332,6 +332,7 @@ class ACLModel:
                 ret = acl.rt.free_host(item["buffer_host"])
         ret = acl.mdl.destroy_dataset(self.output_dataset)
 
+    # 推理入口
     def inference(self, input_data_list: List[np.ndarray], seq_length=1, is_dynamic=False, is_prefill=False) -> List[np.ndarray]:
         """
         执行推理，同步方式

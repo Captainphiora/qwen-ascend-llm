@@ -167,6 +167,13 @@ class AclSession(Session):
         if getattr(self, "_closed", False):
             return
         self._closed = True
+        try:
+            import torch
+            if hasattr(torch, 'npu') and torch.npu.is_available():
+                torch.npu.synchronize()
+                torch.npu.empty_cache()
+        except Exception:
+            pass
         if getattr(self, "model", None) is not None:
             self.model.unload()
             self.model = None
