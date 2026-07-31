@@ -138,73 +138,66 @@ if [ "$RUN_ACL_PROF" = true ]; then
     rm -rf "$PROFILING_DIR"
     mkdir -p "$PROFILING_DIR"
 
-    # 使用已有的 profile_inference.py 的逻辑, 通过 profile_sampling.py --use_msprof
-    eval python profile_sampling.py \
-        $COMMON_ARGS \
-        --prompt \"$PROMPT\" \
-        --max_new_tokens $PROF_MAX_TOKENS \
-        --sampling_method greedy \
-        --use_msprof \
-        --profiling_dir "$PROFILING_DIR" \
-        2>&1 | tee -a "$OUTPUT_FILE"
-
-    echo "" | tee -a "$OUTPUT_FILE"
-
-    # 解析 profiling 数据
-    if [ -d "$PROFILING_DIR" ] && [ "$(ls -A $PROFILING_DIR 2>/dev/null)" ]; then
-        echo ">>> 解析 ACL Profiling 数据..." | tee -a "$OUTPUT_FILE"
-
-        # 使用 msprof 导出解析
-        if [ -n "$MSPROF" ] && [ -f "$MSPROF" ]; then
-            # 找到 PROF_* 子目录 (msprof 需要指向具体的 PROF 目录)
-            PROF_SUBDIR=$(find "$PROFILING_DIR" -maxdepth 1 -type d -name "PROF_*" | head -1)
-            if [ -n "$PROF_SUBDIR" ]; then
-                echo ">>> 使用 msprof 解析: $MSPROF" | tee -a "$OUTPUT_FILE"
-                echo ">>> Profiling 数据目录: $PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
-                ls -la "$PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
-                echo "" | tee -a "$OUTPUT_FILE"
-
-                "$MSPROF" --export=on --output="$PROF_SUBDIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
-            else
-                echo "[WARN] 未找到 PROF_* 子目录" | tee -a "$OUTPUT_FILE"
-                find "$PROFILING_DIR" -maxdepth 2 -type d | tee -a "$OUTPUT_FILE"
-            fi
-        else
-            echo "[WARN] msprof 未找到, 跳过解析。手动解析:" | tee -a "$OUTPUT_FILE"
-            echo "  ${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof --export=on --output=<PROF_DIR>" | tee -a "$OUTPUT_FILE"
-        fi
-
-        # 查找并解析算子统计 CSV
-        echo "" | tee -a "$OUTPUT_FILE"
-        echo ">>> 查找解析后的 CSV 文件:" | tee -a "$OUTPUT_FILE"
-        find "$PROFILING_DIR" -name "*.csv" 2>/dev/null | tee -a "$OUTPUT_FILE"
-        echo "" | tee -a "$OUTPUT_FILE"
-
-        OP_SUMMARY=$(find "$PROFILING_DIR" -name "op_statistic*.csv" 2>/dev/null | head -1)
-        if [ -z "$OP_SUMMARY" ]; then
-            OP_SUMMARY=$(find "$PROFILING_DIR" -name "*op_summary*.csv" 2>/dev/null | head -1)
-        fi
-        if [ -z "$OP_SUMMARY" ]; then
-            OP_SUMMARY=$(find "$PROFILING_DIR" -name "*task_time*.csv" 2>/dev/null | head -1)
-        fi
-
-        if [ -n "$OP_SUMMARY" ] && [ -f "$OP_SUMMARY" ]; then
-            echo ">>> 使用文件: $OP_SUMMARY" | tee -a "$OUTPUT_FILE"
-            echo "" | tee -a "$OUTPUT_FILE"
-            echo "┌── 算子耗时统计 (Top 20) ────────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
-            head -21 "$OP_SUMMARY" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -21 "$OP_SUMMARY" | tee -a "$OUTPUT_FILE"
-            echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
-        else
-            echo "[WARN] 未找到算子统计 CSV" | tee -a "$OUTPUT_FILE"
-            echo ">>> 列出所有 profiling 文件:" | tee -a "$OUTPUT_FILE"
-            find "$PROFILING_DIR" -type f 2>/dev/null | head -30 | tee -a "$OUTPUT_FILE"
-        fi
-
-        echo "" | tee -a "$OUTPUT_FILE"
-        echo ">>> ACL Profiling 原始数据: $PROFILING_DIR" | tee -a "$OUTPUT_FILE"
-        echo "    可视化: 用 MindStudio 打开, 或 msprof --export=on --output=$PROFILING_DIR/" | tee -a "$OUTPUT_FILE"
+    if [ -z "$MSPROF" ] || [ ! -f "$MSPROF" ]; then
+        echo "[ERROR] msprof 未找到, 无法采集 ACL profiling" | tee -a "$OUTPUT_FILE"
     else
-        echo "[WARN] Profiling 目录为空, ACL profiling 可能未成功采集" | tee -a "$OUTPUT_FILE"
+        # 使用 msprof 包裹 Python 执行 (采集完整 host + device 数据)
+        echo ">>> 使用 msprof 包裹执行采集 (host + device 全量数据)..." | tee -a "$OUTPUT_FILE"
+        echo ">>> msprof: $MSPROF" | tee -a "$OUTPUT_FILE"
+        echo "" | tee -a "$OUTPUT_FILE"
+
+        eval "$MSPROF" --output="$PROFILING_DIR" \
+            --ascendcl=on \
+            --task-time=on \
+            --ai-core=on \
+            --aic-metrics=PipeUtilization \
+            --aicpu=on \
+            --runtime-api=on \
+            python profile_sampling.py \
+                $COMMON_ARGS \
+                --prompt \"$PROMPT\" \
+                --max_new_tokens $PROF_MAX_TOKENS \
+                --sampling_method greedy \
+            2>&1 | tee -a "$OUTPUT_FILE"
+
+        echo "" | tee -a "$OUTPUT_FILE"
+
+        # 解析: msprof --export
+        PROF_SUBDIR=$(find "$PROFILING_DIR" -maxdepth 1 -type d -name "PROF_*" | sort | tail -1)
+        if [ -n "$PROF_SUBDIR" ]; then
+            echo ">>> 解析 Profiling 数据: $PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
+            "$MSPROF" --export=on --output="$PROF_SUBDIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+        fi
+
+        echo "" | tee -a "$OUTPUT_FILE"
+
+        # 查找并展示 CSV
+        echo ">>> 解析后的 CSV 文件:" | tee -a "$OUTPUT_FILE"
+        find "$PROFILING_DIR" -name "*.csv" 2>/dev/null | sort | tee -a "$OUTPUT_FILE"
+        echo "" | tee -a "$OUTPUT_FILE"
+
+        # 展示算子统计
+        OP_STAT=$(find "$PROFILING_DIR" -name "op_statistic*.csv" 2>/dev/null | sort | tail -1)
+        if [ -n "$OP_STAT" ] && [ -f "$OP_STAT" ]; then
+            echo ">>> 算子耗时统计: $OP_STAT" | tee -a "$OUTPUT_FILE"
+            echo "┌── Device 算子耗时统计 ──────────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
+            head -21 "$OP_STAT" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -21 "$OP_STAT" | tee -a "$OUTPUT_FILE"
+            echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
+        fi
+
+        # 展示 Host API 统计
+        API_STAT=$(find "$PROFILING_DIR" -name "api_statistic*.csv" 2>/dev/null | sort | tail -1)
+        if [ -n "$API_STAT" ] && [ -f "$API_STAT" ]; then
+            echo "" | tee -a "$OUTPUT_FILE"
+            echo ">>> Host API 耗时统计: $API_STAT" | tee -a "$OUTPUT_FILE"
+            echo "┌── Host 侧 ACL API 耗时统计 ────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
+            head -21 "$API_STAT" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -21 "$API_STAT" | tee -a "$OUTPUT_FILE"
+            echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
+        fi
+
+        echo "" | tee -a "$OUTPUT_FILE"
+        echo ">>> Profiling 原始数据: $PROFILING_DIR" | tee -a "$OUTPUT_FILE"
+        echo "    可视化: 用 MindStudio 打开 $PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
     fi
 
     echo "" | tee -a "$OUTPUT_FILE"
