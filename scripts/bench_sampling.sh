@@ -46,12 +46,14 @@ mkdir -p "$RESULT_DIR"
 RUN_BENCH=true
 RUN_PROF=true
 RUN_ACL_PROF=true
+USE_NPU_SAMPLING=false
 
 for arg in "$@"; do
     case "$arg" in
         --bench-only) RUN_PROF=false; RUN_ACL_PROF=false ;;
         --prof-only)  RUN_BENCH=false ;;
         --no-acl)     RUN_ACL_PROF=false ;;
+        --npu-sampling) USE_NPU_SAMPLING=true ;;
         --device_id=*) DEVICE_ID="${arg#*=}" ;;
         --help|-h)
             echo "用法: bash scripts/bench_sampling.sh [OPTIONS]"
@@ -60,12 +62,26 @@ for arg in "$@"; do
             echo "  --bench-only    仅运行性能对比 benchmark (Part 1)"
             echo "  --prof-only     仅运行 profiling (Part 2+3)"
             echo "  --no-acl        跳过 ACL 算子级 profiling (Part 3)"
+            echo "  --npu-sampling  启用 NPU ATB 采样对比 (会有退出时的 harmless warning)"
             echo "  --device_id=N   指定 NPU 设备号 (默认 7)"
             echo "  --help          显示帮助"
             exit 0
             ;;
     esac
 done
+
+# 设置 NPU 采样环境变量
+if [ "$USE_NPU_SAMPLING" = true ]; then
+    export USE_NPU_SAMPLING=1
+else
+    export USE_NPU_SAMPLING=0
+fi
+
+# msprof 路径 (CANN tools 目录)
+MSPROF="${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof"
+if [ ! -f "$MSPROF" ]; then
+    MSPROF=$(find /usr/local/Ascend -name "msprof" -path "*/cann-9*/bin/msprof" 2>/dev/null | head -1)
+fi
 
 OUTPUT_FILE="${RESULT_DIR}/sampling_full_report_${TIMESTAMP}.txt"
 
@@ -140,8 +156,13 @@ if [ "$RUN_ACL_PROF" = true ]; then
 
         # 使用 msprof 导出
         MSPROF_EXPORT_DIR="${PROFILING_DIR}/export_${TIMESTAMP}"
-        msprof --export=on --output="$PROFILING_DIR" \
-            --export-path="$MSPROF_EXPORT_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+        if [ -n "$MSPROF" ] && [ -f "$MSPROF" ]; then
+            "$MSPROF" --export=on --output="$PROFILING_DIR" \
+                --export-path="$MSPROF_EXPORT_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+        else
+            echo "[WARN] msprof 未找到, 跳过解析。手动解析:" | tee -a "$OUTPUT_FILE"
+            echo "  ${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof --export=on --output=$PROFILING_DIR/" | tee -a "$OUTPUT_FILE"
+        fi
 
         # 查找并解析算子统计 CSV
         OP_SUMMARY=""
