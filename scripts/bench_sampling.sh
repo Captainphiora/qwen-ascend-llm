@@ -154,46 +154,44 @@ if [ "$RUN_ACL_PROF" = true ]; then
     if [ -d "$PROFILING_DIR" ] && [ "$(ls -A $PROFILING_DIR 2>/dev/null)" ]; then
         echo ">>> 解析 ACL Profiling 数据..." | tee -a "$OUTPUT_FILE"
 
-        # 使用 msprof 导出
-        MSPROF_EXPORT_DIR="${PROFILING_DIR}/export_${TIMESTAMP}"
+        # 使用 msprof 导出解析
         if [ -n "$MSPROF" ] && [ -f "$MSPROF" ]; then
-            "$MSPROF" --export=on --output="$PROFILING_DIR" \
-                --export-path="$MSPROF_EXPORT_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+            echo ">>> 使用 msprof 解析: $MSPROF" | tee -a "$OUTPUT_FILE"
+            echo ">>> Profiling 数据目录: $PROFILING_DIR" | tee -a "$OUTPUT_FILE"
+            echo ">>> 目录内容:" | tee -a "$OUTPUT_FILE"
+            find "$PROFILING_DIR" -maxdepth 2 -type d | tee -a "$OUTPUT_FILE"
+            echo "" | tee -a "$OUTPUT_FILE"
+
+            "$MSPROF" --export=on --output="$PROFILING_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
         else
             echo "[WARN] msprof 未找到, 跳过解析。手动解析:" | tee -a "$OUTPUT_FILE"
             echo "  ${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof --export=on --output=$PROFILING_DIR/" | tee -a "$OUTPUT_FILE"
         fi
 
         # 查找并解析算子统计 CSV
-        OP_SUMMARY=""
-        for csv_file in $(find "$MSPROF_EXPORT_DIR" -name "op_statistic*.csv" 2>/dev/null | head -1); do
-            OP_SUMMARY="$csv_file"
-        done
+        echo "" | tee -a "$OUTPUT_FILE"
+        echo ">>> 查找解析后的 CSV 文件:" | tee -a "$OUTPUT_FILE"
+        find "$PROFILING_DIR" -name "*.csv" 2>/dev/null | tee -a "$OUTPUT_FILE"
+        echo "" | tee -a "$OUTPUT_FILE"
 
+        OP_SUMMARY=$(find "$PROFILING_DIR" -name "op_statistic*.csv" 2>/dev/null | head -1)
         if [ -z "$OP_SUMMARY" ]; then
-            # 尝试其他路径
-            for csv_file in $(find "$PROFILING_DIR" -name "op_statistic*.csv" 2>/dev/null | head -1); do
-                OP_SUMMARY="$csv_file"
-            done
+            OP_SUMMARY=$(find "$PROFILING_DIR" -name "*op_summary*.csv" 2>/dev/null | head -1)
+        fi
+        if [ -z "$OP_SUMMARY" ]; then
+            OP_SUMMARY=$(find "$PROFILING_DIR" -name "*task_time*.csv" 2>/dev/null | head -1)
         fi
 
         if [ -n "$OP_SUMMARY" ] && [ -f "$OP_SUMMARY" ]; then
+            echo ">>> 使用文件: $OP_SUMMARY" | tee -a "$OUTPUT_FILE"
             echo "" | tee -a "$OUTPUT_FILE"
             echo "┌── 算子耗时统计 (Top 20) ────────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
             head -21 "$OP_SUMMARY" | column -t -s',' 2>/dev/null | tee -a "$OUTPUT_FILE" || head -21 "$OP_SUMMARY" | tee -a "$OUTPUT_FILE"
             echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
         else
-            echo "[WARN] 未找到 op_statistic CSV, 尝试列出可用文件:" | tee -a "$OUTPUT_FILE"
-            find "$PROFILING_DIR" -name "*.csv" -o -name "*.json" 2>/dev/null | head -20 | tee -a "$OUTPUT_FILE"
-
-            # 尝试直接输出 summary
-            SUMMARY_FILE=$(find "$PROFILING_DIR" -name "*summary*" -name "*.csv" 2>/dev/null | head -1)
-            if [ -n "$SUMMARY_FILE" ]; then
-                echo "" | tee -a "$OUTPUT_FILE"
-                echo "┌── 算子摘要 ────────────────────────────────────────────────────┐" | tee -a "$OUTPUT_FILE"
-                head -30 "$SUMMARY_FILE" | tee -a "$OUTPUT_FILE"
-                echo "└─────────────────────────────────────────────────────────────────┘" | tee -a "$OUTPUT_FILE"
-            fi
+            echo "[WARN] 未找到算子统计 CSV" | tee -a "$OUTPUT_FILE"
+            echo ">>> 列出所有 profiling 文件:" | tee -a "$OUTPUT_FILE"
+            find "$PROFILING_DIR" -type f 2>/dev/null | head -30 | tee -a "$OUTPUT_FILE"
         fi
 
         echo "" | tee -a "$OUTPUT_FILE"
