@@ -156,16 +156,22 @@ if [ "$RUN_ACL_PROF" = true ]; then
 
         # 使用 msprof 导出解析
         if [ -n "$MSPROF" ] && [ -f "$MSPROF" ]; then
-            echo ">>> 使用 msprof 解析: $MSPROF" | tee -a "$OUTPUT_FILE"
-            echo ">>> Profiling 数据目录: $PROFILING_DIR" | tee -a "$OUTPUT_FILE"
-            echo ">>> 目录内容:" | tee -a "$OUTPUT_FILE"
-            find "$PROFILING_DIR" -maxdepth 2 -type d | tee -a "$OUTPUT_FILE"
-            echo "" | tee -a "$OUTPUT_FILE"
+            # 找到 PROF_* 子目录 (msprof 需要指向具体的 PROF 目录)
+            PROF_SUBDIR=$(find "$PROFILING_DIR" -maxdepth 1 -type d -name "PROF_*" | head -1)
+            if [ -n "$PROF_SUBDIR" ]; then
+                echo ">>> 使用 msprof 解析: $MSPROF" | tee -a "$OUTPUT_FILE"
+                echo ">>> Profiling 数据目录: $PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
+                ls -la "$PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
+                echo "" | tee -a "$OUTPUT_FILE"
 
-            "$MSPROF" --export=on --output="$PROFILING_DIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+                "$MSPROF" --export=on --output="$PROF_SUBDIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+            else
+                echo "[WARN] 未找到 PROF_* 子目录" | tee -a "$OUTPUT_FILE"
+                find "$PROFILING_DIR" -maxdepth 2 -type d | tee -a "$OUTPUT_FILE"
+            fi
         else
             echo "[WARN] msprof 未找到, 跳过解析。手动解析:" | tee -a "$OUTPUT_FILE"
-            echo "  ${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof --export=on --output=$PROFILING_DIR/" | tee -a "$OUTPUT_FILE"
+            echo "  ${ASCEND_TOOLKIT_HOME}/tools/profiler/bin/msprof --export=on --output=<PROF_DIR>" | tee -a "$OUTPUT_FILE"
         fi
 
         # 查找并解析算子统计 CSV
