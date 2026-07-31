@@ -92,33 +92,42 @@ class Inference:
 
         elif sampling_method == "top_k" or sampling_method == "top_p":
             assert sampling_value is not None
-            logits = logits.astype(np.float32)
+            logits = logits[0].astype(np.float32)
             logits /= temperature
-            logits -= np.max(logits, axis=-1, keepdims=True)
-            probs = np.exp(logits)
-            probs /= np.sum(probs, axis=-1, keepdims=True)
+            logits -= np.max(logits)
 
             if sampling_method == "top_k":
                 top_k = int(sampling_value)
-                top_indices = np.argpartition(probs[0], -top_k)[-top_k:]
-                top_probs = probs[0][top_indices]
+                top_indices = np.argpartition(logits, -top_k)[-top_k:]
+                top_logits = logits[top_indices]
+                top_logits -= np.max(top_logits)
+                top_probs = np.exp(top_logits)
                 top_probs /= np.sum(top_probs)
                 next_token = np.array([np.random.choice(top_indices, p=top_probs)])
 
             elif sampling_method == "top_p":
                 p = sampling_value
-                k_candidate = min(1000, probs.shape[-1])
-                top_k_indices = np.argpartition(probs[0], -k_candidate)[-k_candidate:]
-                top_k_probs = probs[0][top_k_indices]
-                sorted_order = np.argsort(top_k_probs)[::-1]
-                sorted_probs = top_k_probs[sorted_order]
+                k_candidate = min(100, logits.shape[-1])
+                top_k_indices = np.argpartition(logits, -k_candidate)[-k_candidate:]
+                top_k_logits = logits[top_k_indices]
+                sorted_order = np.argsort(top_k_logits)[::-1]
+                sorted_logits = top_k_logits[sorted_order]
                 sorted_indices = top_k_indices[sorted_order]
+                sorted_logits -= sorted_logits[0]
+                sorted_probs = np.exp(sorted_logits)
+                sorted_probs /= np.sum(sorted_probs)
                 cumulative_probs = np.cumsum(sorted_probs)
                 if cumulative_probs[-1] < p:
-                    sorted_indices_full = np.argsort(probs[0])[::-1]
-                    sorted_probs = probs[0][sorted_indices_full]
+                    k_candidate = min(1000, logits.shape[-1])
+                    top_k_indices = np.argpartition(logits, -k_candidate)[-k_candidate:]
+                    top_k_logits = logits[top_k_indices]
+                    sorted_order = np.argsort(top_k_logits)[::-1]
+                    sorted_logits = top_k_logits[sorted_order]
+                    sorted_indices = top_k_indices[sorted_order]
+                    sorted_logits -= sorted_logits[0]
+                    sorted_probs = np.exp(sorted_logits)
+                    sorted_probs /= np.sum(sorted_probs)
                     cumulative_probs = np.cumsum(sorted_probs)
-                    sorted_indices = sorted_indices_full
                 cutoff = int(np.searchsorted(cumulative_probs, p)) + 1
                 top_indices = sorted_indices[:cutoff]
                 top_probs = sorted_probs[:cutoff]
