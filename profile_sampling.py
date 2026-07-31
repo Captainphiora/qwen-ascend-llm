@@ -300,23 +300,26 @@ def main():
         except Exception as e:
             print(f"[Profile] ACL profiling 启动失败: {e}")
 
-    # Run profiling
+    # Run profiling (默认仅测试 CPU 路径，避免 torch_npu context 冲突)
     test_configs = []
     if args.sampling_method == "all":
         test_configs = [
-            ("Greedy (CPU)", "greedy", 0.8, 0.0, True),
-            ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True),
+            ("Greedy (CPU)", "greedy", 0.8, 0.0, False),
             ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
-            ("Top-k=50 (NPU ATB)", "top_k", 50, 0.7, True),
             ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
         ]
+        if infer_engine.use_npu_sampling:
+            test_configs.insert(1, ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True))
+            test_configs.insert(3, ("Top-k=50 (NPU ATB)", "top_k", 50, 0.7, True))
     else:
         method = args.sampling_method
         val = 0.8 if method == "top_p" else 50
         temp = 0.0 if method == "greedy" else 0.7
         test_configs = [
-            (f"{method} (NPU)", method, val, temp, True),
             (f"{method} (CPU)", method, val, temp, False),
+        ]
+        if infer_engine.use_npu_sampling:
+            test_configs.append((f"{method} (NPU)", method, val, temp, True))
         ]
 
     results = {}

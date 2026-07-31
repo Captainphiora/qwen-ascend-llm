@@ -2,7 +2,6 @@ import numpy as np
 import os
 import time
 import gc
-import atexit
 from transformers import AutoTokenizer
 from enum import Enum
 from threading import Lock
@@ -16,18 +15,6 @@ try:
     HAS_TORCH_NPU = True
 except (ImportError, RuntimeError):
     HAS_TORCH_NPU = False
-
-
-def _cleanup_torch_npu():
-    """在 ACL context 销毁前, 先清理 torch_npu 资源."""
-    if HAS_TORCH_NPU:
-        try:
-            torch.npu.synchronize()
-            torch.npu.empty_cache()
-        except Exception:
-            pass
-
-atexit.register(_cleanup_torch_npu)
 
 
 
@@ -58,18 +45,12 @@ class Inference:
         self.kv_cache_length = config.kv_cache_length
         self.state: dict = {"code":200,"isEnd":False,"message":""}
         self.use_npu_sampling = (
-            HAS_TORCH_NPU and config.session_type == "acl"
+            HAS_TORCH_NPU
+            and config.session_type == "acl"
+            and os.environ.get("USE_NPU_SAMPLING", "0") == "1"
         )
-        if self.use_npu_sampling:
-            npu_device = f"npu:{config.device_id}"
-            torch.npu.set_device(npu_device)
-            self.npu_sampling_device = npu_device
-            self._npu_top_k_greedy = torch.tensor(
-                [1], dtype=torch.int32, device=npu_device
-            )
-            self._npu_top_p_skip = torch.tensor(
-                [1.0], dtype=torch.float16, device=npu_device
-            )
+        if HAS_TORCH_NPU and config.session_type == "acl":
+            self.npu_sampling_device = f"npu:{config.device_id}"
         self.reset()
         self.lock = Lock()
         self.first = True
@@ -159,7 +140,9 @@ class Inference:
             top_k_t = torch.tensor(
                 [min(top_k, 1024)], dtype=torch.int32, device=self.npu_sampling_device
             )
-            top_p_t = self._npu_top_p_skip
+            top_p_t = torch.tensor(
+                [1.0], dtype=torch.float16, device=self.npu_sampling_device
+            )
             q = torch.rand(
                 1, logits_t.shape[-1],
                 dtype=torch.float32, device=self.npu_sampling_device

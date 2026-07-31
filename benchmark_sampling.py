@@ -154,7 +154,7 @@ def main():
     args = parser.parse_args()
 
     from config import InferenceConfig
-    from utils.inference import Inference
+    from utils.inference import Inference, HAS_TORCH_NPU
 
     print(f"[Bench] 加载模型 (device_id={args.device_id})...")
     config = InferenceConfig(
@@ -177,7 +177,9 @@ def main():
         system_prompt="",
     )
     infer_engine = Inference(config)
-    print(f"[Bench] NPU sampling available: {infer_engine.use_npu_sampling}")
+    npu_sampling_available = HAS_TORCH_NPU and config.session_type == "acl"
+    print(f"[Bench] NPU sampling available: {npu_sampling_available}")
+    print(f"[Bench] NPU sampling enabled (env USE_NPU_SAMPLING): {infer_engine.use_npu_sampling}")
 
     # Warmup
     print(f"[Bench] Warmup ({args.warmup} rounds)...")
@@ -185,16 +187,19 @@ def main():
         run_benchmark(infer_engine, "hi", 5, "greedy", 0.8, 0)
 
     # Test configurations
+    # NPU ATB 测试需要设置 USE_NPU_SAMPLING=1 (会产生退出时的 harmless warning)
     test_configs = [
-        ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, True),
-        ("Greedy (CPU argmax, no NPU)", "greedy", 0.8, 0.0, False),
-        ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True),
+        ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, False),
         ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
-        ("Top-p=0.95 (NPU ATB)", "top_p", 0.95, 0.7, True),
         ("Top-p=0.95 (CPU numpy)", "top_p", 0.95, 0.7, False),
-        ("Top-k=50 (NPU ATB)", "top_k", 50, 0.7, True),
         ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
     ]
+    if npu_sampling_available and infer_engine.use_npu_sampling:
+        test_configs.extend([
+            ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True),
+            ("Top-p=0.95 (NPU ATB)", "top_p", 0.95, 0.7, True),
+            ("Top-k=50 (NPU ATB)", "top_k", 50, 0.7, True),
+        ])
 
     all_results = {}
     for label, method, value, temp, use_npu in test_configs:
