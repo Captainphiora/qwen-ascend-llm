@@ -1,18 +1,22 @@
 #!/bin/bash
 
-# KV_CACHE_LENGTH=4096
-KV_CACHE_LENGTH=32768
+KV_CACHE_LENGTH=4096
+# KV_CACHE_LENGTH=32768
 # KV_CACHE_LENGTH=65536
 MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 
-OUTPUT_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_32768/DeepSeek-R1-Distill-Qwen-1.5B_32768_sim.onnx"
-
+# OUTPUT_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_32768/DeepSeek-R1-Distill-Qwen-1.5B_32768_sim.onnx"
+# OUTPUT_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096_simplified_changenode/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified_sim.onnx"
+OUTPUT_MODEL_PATH="opt_models/v4_noexpand/onnx_changed/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
 MAX_PREFILL_LENGTH=1
 ONNX_MODEL_PATH=${OUTPUT_MODEL_PATH}
 # OM_MODEL_PATH="./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_65536_8"
-OM_MODEL_PATH="./output/model_310_cann900/DeepSeek-R1-Distill-Qwen-1.5B_32768_1"
+# OM_MODEL_PATH="./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_noexpand"
+OM_MODEL_PATH="./output/model_310_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_noexpand"
+# OM_MODEL_PATH="./output/model_310_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_noexpand"
+# OM_MODEL_PATH="./output/model_310_cann900/DeepSeek-R1-Distill-Qwen-1.5B_32768_1"
 
 CPU_THREAD=64
 SOC_VERSION=Ascend310B1

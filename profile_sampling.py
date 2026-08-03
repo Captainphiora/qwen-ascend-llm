@@ -320,7 +320,7 @@ def main():
         ]
         if infer_engine.use_npu_sampling:
             test_configs.append((f"{method} (NPU)", method, val, temp, True))
-        ]
+        
 
     results = {}
     for label, method, value, temp, use_npu in test_configs:

@@ -1,11 +1,33 @@
 """Standalone script to simplify an existing ONNX model using onnxsim."""
 
 import os
+import sys
 import argparse
 from collections import Counter
+from datetime import datetime
 
 import onnx
 import onnxsim
+
+
+class TeeLogger:
+    """Duplicate stdout to both console and a log file."""
+
+    def __init__(self, log_path):
+        self.terminal = sys.stdout
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        self.log_file = open(log_path, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
 
 
 def print_onnx_node_info(onnx_model_path: str):
@@ -84,4 +106,19 @@ if __name__ == "__main__":
         base, ext = os.path.splitext(args.input)
         args.output = f"{base}_sim{ext}"
 
-    simplify(args.input, args.output)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(project_root, "onnx_log")
+    input_basename = os.path.splitext(os.path.basename(args.input))[0]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"simplify_{input_basename}_{timestamp}.log"
+    log_path = os.path.join(log_dir, log_filename)
+
+    tee = TeeLogger(log_path)
+    sys.stdout = tee
+
+    try:
+        simplify(args.input, args.output)
+    finally:
+        print(f"\n[LOG] Log saved to: {log_path}")
+        sys.stdout = tee.terminal
+        tee.close()

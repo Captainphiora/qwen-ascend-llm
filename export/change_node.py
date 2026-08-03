@@ -1,9 +1,31 @@
 import os
+import sys
+from datetime import datetime
 import onnx
 import onnx.helper as helper
 from onnx import TensorProto
 from tqdm import tqdm
 import argparse
+
+
+class TeeLogger:
+    """Duplicate stdout to both console and a log file."""
+
+    def __init__(self, log_path):
+        self.terminal = sys.stdout
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        self.log_file = open(log_path, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
 
 
 now_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,52 +56,61 @@ parser.add_argument(
 
 args = parser.parse_args()
 
-output_model_dir = os.path.dirname(os.path.abspath(args.output_model_path))
-os.makedirs(output_model_dir, exist_ok=True)
-for file in os.listdir(output_model_dir):
-    file_path = os.path.join(output_model_dir, file)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
+log_dir = os.path.join(project_dir, "onnx_log")
+input_basename = os.path.splitext(os.path.basename(args.input_model_path))[0]
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_filename = f"change_node_{input_basename}_{timestamp}.log"
+log_path = os.path.join(log_dir, log_filename)
 
-model = onnx.load(args.input_model_path)
-new_nodes = []
+tee = TeeLogger(log_path)
+sys.stdout = tee
 
-for node in tqdm(model.graph.node, desc="replace node..."):
-    # 判断节点类型
-    new_node = node
-    if node.op_type == "Trilu":
-        new_node = helper.make_node(
-            "Trilu",
-            name="MY_" + node.name,
-            inputs=[node.input[0]],
-            outputs=node.output,
-            upper=0
-        )
-    if node.op_type == "Cast":
-        # 替换为新的算子类型
-        to_attribute = next(attr for attr in node.attribute if attr.name == "to")
-        if to_attribute.i == TensorProto.INT8:
+try:
+    output_model_dir = os.path.dirname(os.path.abspath(args.output_model_path))
+    os.makedirs(output_model_dir, exist_ok=True)
+    for file in os.listdir(output_model_dir):
+        file_path = os.path.join(output_model_dir, file)
+        if os.path.isfile(file_path):
+            os.remove(file_path)
+
+    model = onnx.load(args.input_model_path)
+    new_nodes = []
+
+    for node in tqdm(model.graph.node, desc="replace node..."):
+        new_node = node
+        if node.op_type == "Trilu":
             new_node = helper.make_node(
-                "AscendQuant",
-                inputs=node.input,
+                "Trilu",
+                name="MY_" + node.name,
+                inputs=[node.input[0]],
                 outputs=node.output,
-                offset=0.,
-                scale=1.,
+                upper=0
             )
-    new_nodes.append(new_node)
-print("make new graph")
-new_graph = helper.make_graph(
-    new_nodes,
-    "new_graph",
-    inputs=model.graph.input,
-    outputs=model.graph.output,
-    value_info=model.graph.value_info,
-    initializer=model.graph.initializer
-)
-print("make new model")
-new_model = helper.make_model(new_graph, producer_name=model.producer_name,opset_imports=model.opset_import,ir_version = model.ir_version)
-# new_model.ir_version = model.ir_version
-# new_model.opset_import = model.opset_import
-# new_model.metadata_props = model.metadata_props
-print("will save model in ", args.output_model_path)
-onnx.save(new_model, args.output_model_path, save_as_external_data=True)
+        if node.op_type == "Cast":
+            to_attribute = next(attr for attr in node.attribute if attr.name == "to")
+            if to_attribute.i == TensorProto.INT8:
+                new_node = helper.make_node(
+                    "AscendQuant",
+                    inputs=node.input,
+                    outputs=node.output,
+                    offset=0.,
+                    scale=1.,
+                )
+        new_nodes.append(new_node)
+    print("make new graph")
+    new_graph = helper.make_graph(
+        new_nodes,
+        "new_graph",
+        inputs=model.graph.input,
+        outputs=model.graph.output,
+        value_info=model.graph.value_info,
+        initializer=model.graph.initializer
+    )
+    print("make new model")
+    new_model = helper.make_model(new_graph, producer_name=model.producer_name,opset_imports=model.opset_import,ir_version = model.ir_version)
+    print("will save model in ", args.output_model_path)
+    onnx.save(new_model, args.output_model_path, save_as_external_data=True)
+finally:
+    print(f"\n[LOG] Log saved to: {log_path}")
+    sys.stdout = tee.terminal
+    tee.close()

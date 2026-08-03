@@ -19,9 +19,10 @@ import numpy as np
 # CONFIG
 # ============================================================
 HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
+# OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
 OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om"
 SESSION_TYPE = "acl"
-DEVICE_ID = 0
+DEVICE_ID = 5
 KV_CACHE_LENGTH = 4096
 MAX_PREFILL_LENGTH = 1
 MAX_INPUT_LENGTH = 4095

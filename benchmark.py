@@ -27,9 +27,12 @@ from typing import List
 # 默认配置
 # ============================================================
 DEFAULT_HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
-DEFAULT_OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_sim.om"
+# DEFAULT_OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
+# DEFAULT_OM_MODEL_PATH = "opt_models/v0_baseline/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v0_baseline.om"
+DEFAULT_OM_MODEL_PATH = "opt_models/v4_noexpand/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand.om"
 
 
+DEVICE_ID=5
 @dataclass
 class BenchmarkResult:
     prompt_tokens: int = 0
@@ -157,13 +160,13 @@ def print_results(results: List[BenchmarkResult], label: str = ""):
 
 def main():
     parser = argparse.ArgumentParser(description="LLM 推理性能基准测试")
-    parser.add_argument("--prompt", type=str, default="请详细介绍一下机器学习的基本概念",
+    parser.add_argument("--prompt", type=str, default="请详细介绍一下机器学习的基本概念和常用算法",
                         help="测试 prompt")
     parser.add_argument("--max_new_tokens", type=int, default=30,
                         help="最大生成 token 数")
     parser.add_argument("--rounds", type=int, default=3,
                         help="测试轮数")
-    parser.add_argument("--warmup", type=int, default=1,
+    parser.add_argument("--warmup", type=int, default=0,
                         help="预热轮数")
     parser.add_argument("--om_model_path", type=str, default=DEFAULT_OM_MODEL_PATH,
                         help="OM 模型路径")
@@ -173,6 +176,8 @@ def main():
     parser.add_argument("--max_prefill_length", type=int, default=1)
     parser.add_argument("--label", type=str, default="",
                         help="本次测试标签 (如 'baseline' / 'optimized_rope')")
+    parser.add_argument("--device_id", type=int, default=0,
+                        )
     args = parser.parse_args()
 
     from config import InferenceConfig
@@ -189,7 +194,7 @@ def main():
         om_model_path=args.om_model_path,
         onnx_model_path="",
         session_type="acl",
-        device_id=0,
+        device_id=args.device_id,
         max_batch=1,
         max_input_length=4095,
         max_output_length=4096,

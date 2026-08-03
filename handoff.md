@@ -138,6 +138,30 @@ source ~/.bashrc_cann900
 # 等价于: _cann_setup /usr/local/Ascend/cann-9.0.0 /usr/local/Ascend/nnal/atb/9.0.0/atb/set_env.sh
 ```
 
+## NPU Sampling 加速
+
+项目已内置 NPU sampling 支持（`torch_npu.npu_top_k_top_p_sample`），通过环境变量启用：
+
+```bash
+export USE_NPU_SAMPLING=1
+```
+
+### 性能对比（top_p=0.8, temperature=0.6）
+
+| 方案 | greedy | top_p | top_p/greedy |
+|------|--------|-------|--------------|
+| 原始 CPU numpy | 9.7ms | 35.2ms | 3.61x |
+| 优化后 CPU numpy (argpartition) | 9.6ms | 12.3ms | 1.28x |
+| **NPU sampling** | 10.1ms | **10.8ms** | **1.07x** |
+
+NPU sampling 将 top_p 开销降至几乎可忽略（仅多 0.7ms），因为 `npu_top_k_top_p_sample` 算子在 NPU 上用硬件加速完成 softmax + topk + 采样全流程。
+
+### 注意事项
+
+- greedy 模式仍使用 CPU `np.argmax`（避免无意义的 H2D 搬运）
+- 存在 ACL context 和 torch_npu context 的 warning（不影响功能和性能），是 `del engine` 时 cleanup 顺序问题
+- 310B 上 `npu_top_k_top_p_sample` 算子可用性需要验证
+
 ## 未来可能的优化方向
 
 ### 可行方向（310B 兼容）

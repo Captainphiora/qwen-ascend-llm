@@ -136,6 +136,11 @@ def parser_args():
              "其余情况使用用户自定义的提示词。",
         type=str,
         default=SYSTEM_PROMPT,
+    ),
+    parser.add_argument(
+        "--device_id",
+        type=int,
+        default=0,
     )
     return parser.parse_args()
 
@@ -200,6 +205,7 @@ def main_cli():
         sampling_value=args.sampling_value,
         system_prompt=args.system_prompt,
         device_str=args.device_str,
+        device_id=args.device_id
     )
     print("==================== 实际生效的推理配置(config) ====================")
     print("session_type      : {}".format(config.session_type))

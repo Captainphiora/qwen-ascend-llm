@@ -265,9 +265,7 @@ class Qwen2Attention(nn.Module):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        kv_seq_len = key_states.shape[-2] + past_key_value.shape[2]
-        # if past_key_value is not None:
-        #     if self.layer_idx is None:
+        kv_seq_len = key_states.shape[-2] + past_key_value.shape[4]
         #         raise ValueError(
         #             f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
         #             "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
@@ -279,24 +277,23 @@ class Qwen2Attention(nn.Module):
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         output_cache = (key_states, value_states)
         if past_key_value is not None:
-            # cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
-            cache_key = past_key_value[
-                :,
-                self.layer_idx * 2 * self.num_key_value_heads: (self.layer_idx * 2 + 1) * self.num_key_value_heads
-            ]
-            cache_value = past_key_value[
-                :,
-                (self.layer_idx * 2 + 1) * self.num_key_value_heads: (self.layer_idx * 2 + 2) * self.num_key_value_heads
-            ]
+            # past_key_value shape: [1, num_layers, 2*num_kv_heads, kv_len, head_dim]
+            # index layer directly, then split K and V
+            # past_key_value shape: [1, num_layers, 2, num_kv_heads, kv_len, head_dim]
+            cache_key = past_key_value[:, self.layer_idx, 0]    # [1, num_kv_heads, kv_len, head_dim]
+            cache_value = past_key_value[:, self.layer_idx, 1]  # [1, num_kv_heads, kv_len, head_dim]
             key_states = torch.cat((cache_key, key_states), dim=2)
             value_states = torch.cat((cache_value, value_states), dim=2)
-            # key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # repeat k/v heads if n_kv_heads < n_heads
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        # GQA broadcast: avoid repeat_kv expand
+        # query_states: [bsz, num_heads, q_len, head_dim] → [bsz, num_kv_heads, num_groups, q_len, head_dim]
+        # key_states/value_states: [bsz, num_kv_heads, kv_len, head_dim] → [bsz, num_kv_heads, 1, kv_len, head_dim]
+        query_states = query_states.view(bsz, self.num_key_value_heads, self.num_key_value_groups, q_len, self.head_dim)
+        key_states = key_states.unsqueeze(2)      # [bsz, num_kv_heads, 1, kv_len, head_dim]
+        value_states = value_states.unsqueeze(2)  # [bsz, num_kv_heads, 1, kv_len, head_dim]
 
-        attn_weights = torch.matmul(query_states / math.sqrt(self.head_dim), key_states.transpose(2, 3))
+        attn_weights = torch.matmul(query_states / math.sqrt(self.head_dim), key_states.transpose(3, 4))
+        # attn_weights: [bsz, num_kv_heads, num_groups, q_len, kv_len]
 
         # if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
         #     raise ValueError(
@@ -310,12 +307,16 @@ class Qwen2Attention(nn.Module):
         #             f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
         #         )
         #     attn_weights = attn_weights + attention_mask
-        attn_weights = attn_weights + attention_mask
+        attn_weights = attn_weights + attention_mask.unsqueeze(1)
 
         # upcast attention to fp32
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
         attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
         attn_output = torch.matmul(attn_weights, value_states)
+        # attn_output: [bsz, num_kv_heads, num_groups, q_len, head_dim]
+
+        # reshape back to [bsz, num_heads, q_len, head_dim]
+        attn_output = attn_output.view(bsz, self.num_heads, q_len, self.head_dim)
 
         # if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
         #     raise ValueError(
@@ -682,54 +683,37 @@ class Qwen2SdpaAttention(Qwen2Attention):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        kv_seq_len = key_states.shape[-2] + past_key_value.shape[2]
-        # if past_key_value is not None:
-            # kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
+        kv_seq_len = key_states.shape[-2] + past_key_value.shape[4]
             # kv_seq_len += past_key_value.shape[2]
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
 
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         output_cache = (key_states, value_states)
-        # if past_key_value is not None:
-        # cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
-        # key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-        cache_key = past_key_value[
-            :,
-            self.layer_idx * 2 * self.num_key_value_heads: (self.layer_idx * 2 + 1) * self.num_key_value_heads
-        ]
-        cache_value = past_key_value[
-            :,
-            (self.layer_idx * 2 + 1) * self.num_key_value_heads: (self.layer_idx * 2 + 2) * self.num_key_value_heads
-        ]
+        # past_key_value shape: [1, num_layers, 2*num_kv_heads, kv_len, head_dim]
+        # past_key_value shape: [1, num_layers, 2, num_kv_heads, kv_len, head_dim]
+        cache_key = past_key_value[:, self.layer_idx, 0]    # [1, num_kv_heads, kv_len, head_dim]
+        cache_value = past_key_value[:, self.layer_idx, 1]  # [1, num_kv_heads, kv_len, head_dim]
         key_states = torch.cat((cache_key, key_states), dim=2)
         value_states = torch.cat((cache_value, value_states), dim=2)
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        # GQA broadcast: avoid repeat_kv expand
+        # query_states: [bsz, num_heads, q_len, head_dim] → [bsz, num_kv_heads, num_groups, q_len, head_dim]
+        # key_states/value_states: [bsz, num_kv_heads, kv_len, head_dim] → [bsz, num_kv_heads, 1, kv_len, head_dim]
+        query_states = query_states.view(bsz, self.num_key_value_heads, self.num_key_value_groups, q_len, self.head_dim)
+        key_states = key_states.unsqueeze(2)      # [bsz, num_kv_heads, 1, kv_len, head_dim]
+        value_states = value_states.unsqueeze(2)  # [bsz, num_kv_heads, 1, kv_len, head_dim]
 
-        # if attention_mask is not None:
-        #     if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
-        #         raise ValueError(
-        #             f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
-        #         )
+        attn_weights = torch.matmul(query_states / math.sqrt(self.head_dim), key_states.transpose(3, 4))
+        # attn_weights: [bsz, num_kv_heads, num_groups, q_len, kv_len]
 
-        # SDPA with memory-efficient backend is currently (torch==2.1.2) bugged with non-contiguous inputs with custom attn_mask,
-        # Reference: https://github.com/pytorch/pytorch/issues/112577.
-        if query_states.device.type == "cuda" and attention_mask is not None:
-            query_states = query_states.contiguous()
-            key_states = key_states.contiguous()
-            value_states = value_states.contiguous()
-        # copy from chatglm3-6b
-        # attention_mask = ~attention_mask
-        attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query_states,
-            key_states,
-            value_states,
-            attn_mask=attention_mask,
-            # dropout_p=self.attention_dropout if self.training else 0.0,
-            # The q_len > 1 is necessary to match with AttentionMaskConverter.to_causal_4d that does not create a causal mask in case q_len == 1.
-            # is_causal=self.is_causal and attention_mask is None and q_len > 1,
-        )
+        attn_weights = attn_weights + attention_mask.unsqueeze(1)
+
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_output = torch.matmul(attn_weights, value_states)
+        # attn_output: [bsz, num_kv_heads, num_groups, q_len, head_dim]
+
+        # reshape back to [bsz, num_heads, q_len, head_dim]
+        attn_output = attn_output.view(bsz, self.num_heads, q_len, self.head_dim)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
@@ -1099,10 +1083,18 @@ class Qwen2Model(Qwen2PreTrainedModel):
                 sliding_window=self.config.sliding_window,
             )
         """
-        # transpose for past_kv_cache
-        past_key_values = past_key_values.transpose(1, 2)
+        # reshape for per-layer KV cache access (avoid all StridedSlice)
+        # input shape: [1, kv_cache_length, num_layers*2*num_kv_heads, head_dim]
+        # reshape to: [1, num_layers, 2, num_kv_heads, kv_cache_length, head_dim]
+        num_layers = len(self.layers)
+        num_kv_heads = self.config.num_key_value_heads
+        head_dim = self.config.hidden_size // self.config.num_attention_heads
+        past_key_values = past_key_values.permute(0, 2, 1, 3)  # [1, num_layers*2*kv_heads, kv_len, head_dim]
+        past_key_values = past_key_values.view(
+            1, num_layers, 2, num_kv_heads, -1, head_dim
+        )  # [1, num_layers, 2, num_kv_heads, kv_len, head_dim]
         # copy from chatglm3-6b for onnx export
-        past_length = past_key_values.shape[2]
+        past_length = past_key_values.shape[4]
         full_attention_mask = self.get_masks(
             input_ids,
             past_length,

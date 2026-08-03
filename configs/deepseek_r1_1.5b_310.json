@@ -27,7 +27,7 @@
     "generation": {
         "temperature": 0.6,
         "sampling_method": "top_p",
-        "sampling_value": 0.8,
+        "sampling_value": 0.95,
         "system_prompt": ""
     }
 }
