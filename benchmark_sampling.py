@@ -72,8 +72,9 @@ def run_benchmark(infer_engine, prompt, max_new_tokens, sampling_method, samplin
             t_first_token = time.perf_counter()
 
         t_sample_start = time.perf_counter()
+        last_logits = infer_engine._get_last_logits(logits)
         next_token = infer_engine.sample_logits(
-            logits[0][-1:], sampling_method, sampling_value, temperature
+            last_logits, sampling_method, sampling_value, temperature
         )
         t_sample_end = time.perf_counter()
 
@@ -205,10 +206,12 @@ def main():
     for label, method, value, temp, use_npu in test_configs:
         infer_engine.sampling_method = method
         infer_engine.temperature = temp
-        if use_npu and infer_engine.use_npu_sampling:
+        if use_npu:
             infer_engine.use_npu_sampling = True
+            infer_engine.session.model._skip_logits_d2h = True
         else:
             infer_engine.use_npu_sampling = False
+            infer_engine.session.model._skip_logits_d2h = False
 
         results = []
         for r in range(args.rounds):
@@ -219,7 +222,9 @@ def main():
         print(f"  {label:<30} -> {avg_decode:.1f} tok/s")
 
     # Restore npu sampling
-    infer_engine.use_npu_sampling = True
+    if npu_sampling_available:
+        infer_engine.use_npu_sampling = True
+        infer_engine.session.model._skip_logits_d2h = True
 
     print_comparison(all_results, args)
 
