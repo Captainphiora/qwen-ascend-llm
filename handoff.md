@@ -264,53 +264,107 @@ top_p:   argpartition(100) + sort(100) + cumsum截断 → 1.8ms/token
 - 若模型 decode 速度为 ~30-50ms/token（310B NPU），采样开销占比约 10-30%
 - 如果采样成为瓶颈，进一步优化方向见下方
 
-### 进一步优化方向（如 310B CPU 采样成为瓶颈）
+### NPU 零拷贝采样（已实现，最终方案）
 
-已实现 NPU ATB 采样方案（见下节），310B 上可直接启用。其余备选方向：
+使用 `torch_npu.npu_top_k_top_p_sample` 算子 + ACL D2D memcpy，logits 不拷回 Host，全程在 NPU 上完成采样。
 
-| 方向 | 描述 | 难度 |
-|------|------|------|
-| 降低 k_candidate | 将 top-100 降为 top-50（对 p≤0.9 通常足够） | 低 |
-| 避免 D2H logits 拷贝 | 修改 AclSession 保留 NPU buffer，仅拷回采样结果 | 高 |
-| ARM NEON 优化 | 用 Cython/Numba 对 argpartition 做 SIMD 加速 | 中 |
+**数据流对比：**
 
-### NPU ATB 采样集成（已实现）
+```
+之前 (CPU采样):
+  NPU推理 → D2H 594KB (logits fp32) → CPU采样 1.7ms → next_token
 
-使用 `torch_npu.npu_top_k_top_p_sample` 算子，将 top_p/top_k 采样在 NPU 上完成。
-
-**接口说明：**
-
-```python
-torch_npu.npu_top_k_top_p_sample(
-    logits,    # [batch, vocab_size], float16/bfloat16, 待采样词频
-    top_k,     # [batch], int32, 1≤k≤1024
-    top_p,     # [batch], float16, 0<p<1 (设≥1则跳过topP)
-    q=None,    # [batch, vocab_size], float32, 随机权重(None则跳过sample)
-) -> (logits_select_idx, logits_top_kp_select)
+现在 (NPU零拷贝):
+  NPU推理 → logits留device → D2D到torch tensor (0.01ms) → ATB采样 (0.2ms) → D2H 8B (token id)
 ```
 
-**设计策略（hybrid）：**
-- **Greedy**: CPU argmax（简单 argmax 不值得 H2D 数据搬移开销）
-- **Top_k/Top_p**: NPU ATB 算子（复杂采样在 NPU 上快 8.6x）
-- 自动检测 `torch_npu` 可用性，不可用时回退 CPU numpy
+**实现要点：**
+- `engine.py`: `_skip_logits_d2h` 标志位，返回 device 指针而非 numpy
+- `inference.py`: `acl.rt.memcpy(D2D)` 从 ACL buffer 到预分配的 torch tensor，然后调用 ATB 采样算子
+- `session.py`: 透传 device dict（含 device_ptr, nbytes, shape, dtype）
 
-**实测结果（910, DeepSeek-R1-Distill-Qwen-1.5B）：**
+**关键发现：OM 模型 logits 输出为 float32（非 fp16）**，即使模型配置为 fp16。原因是 ONNX 图最后有 Cast 节点。因此每步 D2H 实际为 594KB（151936×4），不是 296KB。
+
+**实测结果（910, device_id=7, DeepSeek-R1-Distill-Qwen-1.5B）：**
 
 | 配置 | Decode 速度 | 说明 |
 |------|------------|------|
-| Greedy (CPU argmax) | 105.9 tok/s | 最优：H2D 拷贝开销 > argmax 计算 |
-| Top_p (NPU ATB) | 94.7 tok/s | 比 CPU numpy 86.5 tok/s 快 9.5% |
-| Top_p (CPU numpy) | 86.5 tok/s | fallback 路径 |
+| Greedy (NPU zero-copy) | 107 tok/s | NPU argmax |
+| Top_p (NPU zero-copy) | **101.5 tok/s** | ATB 算子采样 |
+| Greedy (CPU argmax) | 111 tok/s | 仅 D2H + argmax |
+| Top_p (CPU numpy) | 89 tok/s | D2H + numpy 采样 |
 
-**310B 预期收益更大**：ARM CPU 弱（argpartition ~10ms），NPU ATB 采样 ~0.2ms 可节省 ~10ms/token。
+**Top_p vs Greedy 差距从 20% 缩小到 5%。**
 
-**支持的硬件：** Atlas A2/A3 训练/推理系列产品（910, 310B4 等）。需确认 310B 是否在支持列表内（文档标注 "A200I A2 Box 异构组件" 支持）。
+**启用方式：**
+
+```bash
+# 环境变量启用 NPU 零拷贝采样
+USE_NPU_SAMPLING=1 python cli_chat.py --device_id 7 --sampling_method top_p ...
+
+# 或在 bench 脚本中
+bash scripts/bench_sampling.sh --npu-sampling
+```
+
+**注意事项：**
+- 启动时可能有一条 torch_npu stream warning（框架初始化噪音，不影响推理）
+- 310B 上收益更大（ARM CPU 采样慢 5-10x，NPU ATB 不受影响）
+- 需要 `torch_npu` 可用（CANN 9.0.0 + torch_npu 2.7.1）
+
+### 采样优化使用指南
+
+#### 快速开始
+
+```bash
+# 默认模式（CPU 采样，无 warning，适合大部分场景）
+python cli_chat.py \
+    --om_model_path output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om \
+    --hf_model_dir /mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B \
+    --device_id 7 --session_type acl --sampling_method top_p \
+    --sampling_value 0.8 --temperature 0.7
+
+# 高性能模式（NPU 零拷贝采样，top_p 提速 14%）
+USE_NPU_SAMPLING=1 python cli_chat.py \
+    --om_model_path output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om \
+    --hf_model_dir /mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B \
+    --device_id 7 --session_type acl --sampling_method top_p \
+    --sampling_value 0.8 --temperature 0.7
+```
+
+#### 性能测试与 Profiling
+
+```bash
+# 一键完整测试（性能对比 + 详细 profiling + ACL 算子统计）
+bash scripts/bench_sampling.sh
+
+# 仅性能对比
+bash scripts/bench_sampling.sh --bench-only
+
+# 仅 profiling（Host/Device 耗时 + 数据搬运 + 算力利用率）
+bash scripts/bench_sampling.sh --prof-only
+
+# 跳过 ACL 算子级 profiling（更快）
+bash scripts/bench_sampling.sh --no-acl
+
+# 含 NPU 采样对比
+bash scripts/bench_sampling.sh --npu-sampling
+
+# 指定设备
+bash scripts/bench_sampling.sh --device_id=5
+```
+
+配置参数在 `scripts/bench_sampling.sh` 文件头部修改（prompt、token 数、轮次等）。
+输出报告：`benchmark_results/sampling_full_report_<timestamp>.txt`
 
 ### 相关 Git 提交
 
 ```
+567fd3e fix: 消除torch_npu退出时的stream warning
+3c124b9 feat: 实现logits零拷贝NPU采样 - 跳过D2H, D2D直接采样
+11c0693 feat: profiling报告中添加数据搬运(H2D/D2H)具体耗时统计
+3769ee8 feat: 添加采样性能benchmark和详细profiling脚本
 7f6f400 feat: 集成NPU ATB采样算子 (torch_npu.npu_top_k_top_p_sample)
 728ee30 perf: greedy采样优化 - fp16转fp32后argmax (0.98ms→0.31ms, 3.2x提速)
-b5d9546 perf: 采样优化最终方案 - numpy argpartition+局部softmax (1.7ms/token, 比torch.sort快30x+)
+b5d9546 perf: 采样优化最终方案 - numpy argpartition+局部softmax (1.7ms/token)
 1e980b7 perf: 优化top_p采样 - 避免全量softmax, 减少k_candidate (17ms→2.3ms/token)
 ```
