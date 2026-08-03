@@ -247,7 +247,7 @@ class ACLModel:
         print("\r[INFO] load model buffer 100.00%")
         gc.collect()
         st = time.time()
-        print("[INFO] load model from memory, please wait a monment...")
+        print("[INFO] load model from memory, please wait a moment...")
         self.model_id, ret = acl.mdl.load_from_mem(model_buffer, model_buffer_size)
         check_ret("load model",ret)
         et = time.time()
@@ -332,6 +332,7 @@ class ACLModel:
                 ret = acl.rt.free_host(item["buffer_host"])
         ret = acl.mdl.destroy_dataset(self.output_dataset)
 
+    # 推理入口
     def inference(self, input_data_list: List[np.ndarray], seq_length=1, is_dynamic=False, is_prefill=False) -> List[np.ndarray]:
         """
         执行推理，同步方式
@@ -456,6 +457,17 @@ class ACLModel:
                 output_itemsize = self.outputs[0]["size"]
                 output_size = output_itemsize // np.dtype(self.outputs[0]["dtype"]).itemsize
             logits_shape = [self.max_batch, seq_length, self.config.vocab_size]
+
+            # 如果调用方要求保留 device 指针（用于 NPU 侧采样），跳过 D2H
+            if getattr(self, '_skip_logits_d2h', False):
+                actual_nbytes = self.max_batch * seq_length * self.config.vocab_size * np.dtype(self.outputs[0]['dtype']).itemsize
+                return {
+                    'device_ptr': self.outputs[0]["buffer"],
+                    'nbytes': actual_nbytes,
+                    'shape': logits_shape,
+                    'dtype': self.outputs[0]['dtype'],
+                }
+
             ret = acl.rt.memcpy(
                 self.outputs[0]['buffer_host'],
                 self.outputs[0]["size"],

@@ -118,17 +118,29 @@ def parser_args():
         default=TEMPERATURE,
     )
     parser.add_argument(
-        "--top_p",
-        help="top-p (nucleus) sampling value, range (0, 1].",
+        "--sampling_method",
+        help="sampling method: greedy, top_p, or top_k",
+        type=str,
+        default="top_p",
+        choices=["greedy", "top_p", "top_k"],
+      )
+    parser.add_argument(
+        "--sampling_value",
+        help="sampling value: top_p range (0,1], top_k positive int",
         type=float,
-        default=0.8,
-    )
+        default=0.8
+    ),
     parser.add_argument(
         "--system_prompt",
-        help="system prompt; 完全以命令行为准：不传或传空字符串则不添加 system 消息，"
+        help="system prompt; 以命令行为准：不传或传空字符串则不添加 system 消息，"
              "其余情况使用用户自定义的提示词。",
         type=str,
         default=SYSTEM_PROMPT,
+    ),
+    parser.add_argument(
+        "--device_id",
+        type=int,
+        default=0,
     )
     return parser.parse_args()
 
@@ -189,9 +201,11 @@ def main_cli():
         dtype=args.dtype,
         torch_dtype=args.torch_dtype,
         temperature=args.temperature,
-        sampling_value=args.top_p,
+        sampling_method=args.sampling_method,
+        sampling_value=args.sampling_value,
         system_prompt=args.system_prompt,
         device_str=args.device_str,
+        device_id=args.device_id
     )
     print("==================== 实际生效的推理配置(config) ====================")
     print("session_type      : {}".format(config.session_type))
@@ -213,7 +227,7 @@ def main_cli():
     print("torch_dtype       : {}".format(config.torch_dtype))
     print("-------------------- 采样相关(是否 greedy) --------------------")
     print("sampling_method   : {}".format(config.sampling_method))
-    print("sampling_value(p) : {}".format(config.sampling_value))
+    print("sampling_value : {}".format(config.sampling_value))
     print("temperature       : {}".format(config.temperature))
     is_greedy = (config.temperature == 0) or (config.sampling_method == "greedy")
     print("=> 实际是否 greedy : {}".format(is_greedy))

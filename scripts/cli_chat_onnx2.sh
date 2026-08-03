@@ -1,0 +1,22 @@
+SESSION_TYPE="onnx"
+# DEVICE_STR="cpu"
+DEVICE_STR="npu"
+KV_CACHE_LENGTH=4096
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
+DTYPE="float16"
+MAX_INPUT_LENGTH=1024
+CPU_THREAD=8
+MAX_OUTPUT_LENGTH=${KV_CACHE_LENGTH}
+ONNX_MODEL_PATH="output/onnx2_DeepSeek-R1-Distill-Qwen-1.5B_4096/DeepSeek-R1-Distill-Qwen-1.5B_4096_rectified.onnx"
+# TEMPERATURE=0
+TEMPERATURE=0.6
+python3 ./cli_chat.py \
+  --session_type=$SESSION_TYPE \
+  --hf_model_dir=$HF_MODEL_DIR \
+  --onnx_model_path=$ONNX_MODEL_PATH \
+  --cpu_thread=$CPU_THREAD \
+  --dtype=$DTYPE \
+  --max_input_length=$MAX_INPUT_LENGTH \
+  --max_output_length=$MAX_OUTPUT_LENGTH \
+  --temperature=$TEMPERATURE

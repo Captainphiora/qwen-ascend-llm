@@ -10,6 +10,12 @@ from config import InferenceConfig
 from tqdm import trange, tqdm
 import torch
 
+try:
+    import torch_npu
+    HAS_TORCH_NPU = True
+except (ImportError, RuntimeError):
+    HAS_TORCH_NPU = False
+
 
 
 # Inference类 负责tokenizer管理、对话模板、token采样和生成循环：
@@ -38,11 +44,33 @@ class Inference:
         # self.prompt=config.prompt
         self.kv_cache_length = config.kv_cache_length
         self.state: dict = {"code":200,"isEnd":False,"message":""}
+        self.use_npu_sampling = (
+            HAS_TORCH_NPU
+            and config.session_type == "acl"
+            and os.environ.get("USE_NPU_SAMPLING", "0") == "1"
+        )
+        if HAS_TORCH_NPU and config.session_type == "acl":
+            self.npu_sampling_device = f"npu:{config.device_id}"
+        if self.use_npu_sampling:
+            self.session.model._skip_logits_d2h = True
+            vocab_size = config.vocab_size
+            self._npu_logits_buffer = torch.empty(
+                1, vocab_size, dtype=torch.float32,
+                device=self.npu_sampling_device
+            )
         self.reset()
         self.lock = Lock()
         self.first = True
         # self.stop_mp = {"[|Human|]":6,"[|AI|]":5,"<|assistant|>":6,"<|user|>":5}
         print("[INFO] init success")
+
+    @staticmethod
+    def _get_last_logits(logits):
+        """从 session.run() 的返回中提取最后一个 token 的 logits。
+        logits 可以是 numpy array 或 device dict。"""
+        if isinstance(logits, dict):
+            return logits
+        return logits[0][-1:]
 
 
     def generate_cache(self, prompt: str):
@@ -62,7 +90,7 @@ class Inference:
         ).reshape(1,-1)
         logits = self.session.run(input_ids)[0]
         next_token = self.sample_logits(
-            logits[0][-1:],
+            self._get_last_logits(logits),
             self.sampling_method,
             self.sampling_value,
             self.temperature
@@ -71,53 +99,161 @@ class Inference:
 
     def sample_logits(
         self,
-        logits: np.ndarray,
+        logits,
         sampling_method: str = "greedy",
         sampling_value: float = None,
         temperature: float = 1.0,
     ) -> np.ndarray:
         """
-        对logits做采样，得到下一个token
-        Args:
-            logits (np.ndarray): 
-            sampling_method (str, optional):  采样方法，默认是"greedy"，支持top_p, top_k
-            sampling_value (float, optional): _description_. Defaults to None.
-            temperature (float, optional): _description_. Defaults to 1.0.
-
-        Raises:
-            Exception: _description_
+        对logits做采样，得到下一个token。
+        logits 可以是:
+          - np.ndarray [1, vocab_size] (CPU 路径)
+          - dict {'device_ptr':..., 'nbytes':..., 'shape':..., 'dtype':...} (NPU zero-copy 路径)
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: 下一个 token id
+        """
+        if self.use_npu_sampling:
+            return self._sample_logits_npu(
+                logits, sampling_method, sampling_value, temperature
+            )
+        return self._sample_logits_cpu(
+            logits, sampling_method, sampling_value, temperature
+        )
+
+    def _sample_logits_npu(
+        self,
+        logits,
+        sampling_method: str,
+        sampling_value: float,
+        temperature: float,
+    ) -> np.ndarray:
+        """
+        NPU ATB 采样 (zero-copy): logits 留在 device，D2D 拷贝到 torch tensor 后采样。
+        仅回传 1 个 token id (8 bytes) 到 Host。
+        """
+        import acl
+        ACL_MEMCPY_DEVICE_TO_DEVICE = 3
+
+        if isinstance(logits, dict):
+            device_ptr = logits['device_ptr']
+            nbytes = logits['nbytes']
+            vocab_size = logits['shape'][-1]
+        else:
+            raise ValueError("NPU sampling expects device dict, got numpy")
+
+        if temperature == 0 or sampling_method == "greedy":
+            logits_t = self._npu_logits_buffer[:, :vocab_size]
+            nbytes_dst = logits_t.nelement() * logits_t.element_size()
+            ret = acl.rt.memcpy(
+                logits_t.data_ptr(), nbytes_dst,
+                device_ptr, nbytes,
+                ACL_MEMCPY_DEVICE_TO_DEVICE
+            )
+            idx = logits_t.argmax(dim=-1)
+            return idx.cpu().numpy().flatten().astype(np.int64)
+
+        logits_t = self._npu_logits_buffer[:, :vocab_size]
+        nbytes_dst = logits_t.nelement() * logits_t.element_size()
+        ret = acl.rt.memcpy(
+            logits_t.data_ptr(), nbytes_dst,
+            device_ptr, nbytes,
+            ACL_MEMCPY_DEVICE_TO_DEVICE
+        )
+        logits_t = (logits_t / temperature).half()
+
+        if sampling_method == "top_k":
+            top_k = int(sampling_value)
+            top_k_t = torch.tensor(
+                [min(top_k, 1024)], dtype=torch.int32, device=self.npu_sampling_device
+            )
+            top_p_t = torch.tensor(
+                [1.0], dtype=torch.float16, device=self.npu_sampling_device
+            )
+            q = torch.rand(
+                1, vocab_size,
+                dtype=torch.float32, device=self.npu_sampling_device
+            )
+            idx, _ = torch_npu.npu_top_k_top_p_sample(
+                logits_t, top_k_t, top_p_t, q
+            )
+        elif sampling_method == "top_p":
+            top_k_t = torch.tensor(
+                [100], dtype=torch.int32, device=self.npu_sampling_device
+            )
+            top_p_t = torch.tensor(
+                [sampling_value], dtype=torch.float16, device=self.npu_sampling_device
+            )
+            q = torch.rand(
+                1, vocab_size,
+                dtype=torch.float32, device=self.npu_sampling_device
+            )
+            idx, _ = torch_npu.npu_top_k_top_p_sample(
+                logits_t, top_k_t, top_p_t, q
+            )
+        else:
+            raise Exception(f"Unknown sampling method {sampling_method}")
+
+        return idx.cpu().numpy().flatten()
+
+    def _sample_logits_cpu(
+        self,
+        logits: np.ndarray,
+        sampling_method: str,
+        sampling_value: float,
+        temperature: float,
+    ) -> np.ndarray:
+        """
+        CPU numpy 采样 (fallback)。
         """
         if temperature == 0 or sampling_method == "greedy":
+            if logits.dtype != np.float32:
+                logits = logits.astype(np.float32)
             next_token = np.argmax(logits, axis=-1).astype(np.int64)
 
         elif sampling_method == "top_k" or sampling_method == "top_p":
             assert sampling_value is not None
-            logits = logits.astype(np.float32)
+            logits = logits[0].astype(np.float32)
             logits /= temperature
-            probs = np.exp(logits) / np.sum(np.exp(logits))
-            sorted_probs = np.sort(probs)[:, ::-1]
-            sorted_indices = np.argsort(probs)[:, ::-1]
+            logits -= np.max(logits)
 
             if sampling_method == "top_k":
-                index_of_interest = int(sampling_value)
+                top_k = int(sampling_value)
+                top_indices = np.argpartition(logits, -top_k)[-top_k:]
+                top_logits = logits[top_indices]
+                top_logits -= np.max(top_logits)
+                top_probs = np.exp(top_logits)
+                top_probs /= np.sum(top_probs)
+                next_token = np.array([np.random.choice(top_indices, p=top_probs)])
+
             elif sampling_method == "top_p":
                 p = sampling_value
-                cumulative_probs = np.cumsum(sorted_probs, axis=-1)
-                for index_of_interest, cumulative_prob in enumerate(
-                    cumulative_probs[0]
-                ):
-                    if cumulative_prob > p:
-                        break
-
-            probs_of_interest = sorted_probs[:, : index_of_interest + 1]
-            indices_of_interest = sorted_indices[:, : index_of_interest + 1]
-            probs_of_interest /= np.sum(probs_of_interest)
-            next_token = np.array(
-                [np.random.choice(indices_of_interest[0], p=probs_of_interest[0])]
-            )
+                k_candidate = min(100, logits.shape[-1])
+                top_k_indices = np.argpartition(logits, -k_candidate)[-k_candidate:]
+                top_k_logits = logits[top_k_indices]
+                sorted_order = np.argsort(top_k_logits)[::-1]
+                sorted_logits = top_k_logits[sorted_order]
+                sorted_indices = top_k_indices[sorted_order]
+                sorted_logits -= sorted_logits[0]
+                sorted_probs = np.exp(sorted_logits)
+                sorted_probs /= np.sum(sorted_probs)
+                cumulative_probs = np.cumsum(sorted_probs)
+                if cumulative_probs[-1] < p:
+                    k_candidate = min(1000, logits.shape[-1])
+                    top_k_indices = np.argpartition(logits, -k_candidate)[-k_candidate:]
+                    top_k_logits = logits[top_k_indices]
+                    sorted_order = np.argsort(top_k_logits)[::-1]
+                    sorted_logits = top_k_logits[sorted_order]
+                    sorted_indices = top_k_indices[sorted_order]
+                    sorted_logits -= sorted_logits[0]
+                    sorted_probs = np.exp(sorted_logits)
+                    sorted_probs /= np.sum(sorted_probs)
+                    cumulative_probs = np.cumsum(sorted_probs)
+                cutoff = int(np.searchsorted(cumulative_probs, p)) + 1
+                top_indices = sorted_indices[:cutoff]
+                top_probs = sorted_probs[:cutoff]
+                top_probs /= np.sum(top_probs)
+                next_token = np.array([np.random.choice(top_indices, p=top_probs)])
         else:
             raise Exception(f"Unknown sampling method {sampling_method}")
 
@@ -211,7 +347,7 @@ class Inference:
             )
             # 采样下一个token
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature
@@ -318,7 +454,7 @@ class Inference:
                 show_progress=prefill_show_progress
             )
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature
@@ -374,7 +510,7 @@ class Inference:
                 show_progress=prefill_show_progress
             )
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature

@@ -167,13 +167,26 @@ class AclSession(Session):
         if getattr(self, "_closed", False):
             return
         self._closed = True
-        if getattr(self, "model", None) is not None:
-            self.model.unload()
-            self.model = None
-        if getattr(self, "context", None) is not None:
-            from utils.engine import destroy_resource
-            destroy_resource(self.device_id, self.context)
-            self.context = None
+        _torch_npu_used = False
+        try:
+            import torch
+            _torch_npu_used = hasattr(torch, 'npu') and torch.npu.is_available()
+        except Exception:
+            pass
+
+        if _torch_npu_used:
+            import atexit, sys, os
+            def _suppress_torch_npu_exit_noise():
+                sys.stderr = open(os.devnull, 'w')
+            atexit.register(_suppress_torch_npu_exit_noise)
+        else:
+            if getattr(self, "model", None) is not None:
+                self.model.unload()
+                self.model = None
+            if getattr(self, "context", None) is not None:
+                from utils.engine import destroy_resource
+                destroy_resource(self.device_id, self.context)
+        self.context = None
 
     def __del__(self):
         try:
@@ -256,6 +269,8 @@ class AclSession(Session):
             [input_ids, mask, pos_ids], seq_length, is_dynamic, is_prefill=is_prefill
         )
         if not is_prefill:
+            if isinstance(logits, dict):
+                return logits
             return logits.reshape(self.max_batch, seq_length,-1)
         else:
             return None

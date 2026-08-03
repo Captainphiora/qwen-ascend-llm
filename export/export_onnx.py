@@ -6,6 +6,7 @@ import os
 import json
 import sys
 from typing import List
+from datetime import datetime
 import torch
 import shutil
 # from transformers import AutoModel, Qwen2Config
@@ -16,6 +17,26 @@ import onnx
 import io
 import argparse
 from collections import Counter
+
+
+class TeeLogger:
+    """Duplicate stdout to both console and a log file."""
+
+    def __init__(self, log_path):
+        self.terminal = sys.stdout
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        self.log_file = open(log_path, "w", encoding="utf-8")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
 
 
 now_dir = os.path.dirname(os.path.abspath(__file__))
@@ -228,51 +249,62 @@ if __name__ == "__main__":
     args = parser_arguments()
     onnx_model_dir = os.path.dirname(os.path.abspath(args.onnx_model_path))
     os.makedirs(onnx_model_dir, exist_ok=True)
-    if len(os.listdir(onnx_model_dir)) > 0:
-        print("found some file in {}, will clear it".format(onnx_model_dir))
-        for temp_file in os.listdir(onnx_model_dir):
-            temp_path = os.path.join(onnx_model_dir, temp_file)
-            if os.path.isfile(temp_path):
-                os.remove(temp_path)
-    # model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
-    # copy modeling_qwen2.py to model dir
-    src_file_path = os.path.join(now_dir, "modeling_qwen2.py")
-    target_file_path = os.path.join(args.hf_model_dir, "modeling_qwen2.py")
-    shutil.copy(src_file_path, target_file_path)
-    # print(model_config)
-    config_json = os.path.join(args.hf_model_dir, "config.json")
-    with open(config_json, "rt", encoding="utf-8") as f:
-        model_config = json.load(f)
-    model_config["auto_map"] = {
-        "AutoModel": "modeling_qwen2.Qwen2ForCausalLM",
-        "AutoModelForCausalLM": "modeling_qwen2.Qwen2ForCausalLM",
-        "AutoModelForSeq2SeqLM": "modeling_qwen2.Qwen2ForCausalLM",
-        "AutoModelForSequenceClassification": "modeling_qwen2.Qwen2ForSequenceClassification"
-    }
-    with open(config_json, "wt", encoding="utf-8") as f:
-        json.dump(model_config, f, indent=4)
-    test_model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
-    # print(test_model_config)
-    test_model_config.torch_dtype = "float16"
-    test_model_config.save_pretrained(args.hf_model_dir)
-    num_hidden_layers = test_model_config.num_hidden_layers
-    num_attention_heads = test_model_config.num_attention_heads
-    num_key_value_heads = test_model_config.num_key_value_heads
-    hidden_size = test_model_config.hidden_size
-    per_head_dim = hidden_size // num_attention_heads
-    print("new model config save ok in ", args.hf_model_dir)
-    print("begin export onnx")
-    export_onnx(
-        device_str=args.device_str,
-        dtype=args.dtype,
-        hf_model_dir=args.hf_model_dir,
-        onnx_model_path=args.onnx_model_path,
-        kv_cache_length=args.kv_cache_length,
-        num_hidden_layers=num_hidden_layers,
-        num_key_value_heads=num_key_value_heads,
-        per_head_dim=per_head_dim
-    )
-    print("onnx export done, save in ", args.onnx_model_path)
-    print_onnx_node_info(args.onnx_model_path)
-    if args.simplify == "true":
-        simplify_onnx(args.onnx_model_path)
+
+    log_dir = os.path.join(project_dir, "onnx_log")
+    onnx_basename = os.path.splitext(os.path.basename(args.onnx_model_path))[0]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"export_{onnx_basename}_{timestamp}.log"
+    log_path = os.path.join(log_dir, log_filename)
+
+    tee = TeeLogger(log_path)
+    sys.stdout = tee
+
+    try:
+        if len(os.listdir(onnx_model_dir)) > 0:
+            print("found some file in {}, will clear it".format(onnx_model_dir))
+            for temp_file in os.listdir(onnx_model_dir):
+                temp_path = os.path.join(onnx_model_dir, temp_file)
+                if os.path.isfile(temp_path):
+                    os.remove(temp_path)
+        src_file_path = os.path.join(now_dir, "modeling_qwen2.py")
+        target_file_path = os.path.join(args.hf_model_dir, "modeling_qwen2.py")
+        shutil.copy(src_file_path, target_file_path)
+        config_json = os.path.join(args.hf_model_dir, "config.json")
+        with open(config_json, "rt", encoding="utf-8") as f:
+            model_config = json.load(f)
+        model_config["auto_map"] = {
+            "AutoModel": "modeling_qwen2.Qwen2ForCausalLM",
+            "AutoModelForCausalLM": "modeling_qwen2.Qwen2ForCausalLM",
+            "AutoModelForSeq2SeqLM": "modeling_qwen2.Qwen2ForCausalLM",
+            "AutoModelForSequenceClassification": "modeling_qwen2.Qwen2ForSequenceClassification"
+        }
+        with open(config_json, "wt", encoding="utf-8") as f:
+            json.dump(model_config, f, indent=4)
+        test_model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
+        test_model_config.torch_dtype = "float16"
+        test_model_config.save_pretrained(args.hf_model_dir)
+        num_hidden_layers = test_model_config.num_hidden_layers
+        num_attention_heads = test_model_config.num_attention_heads
+        num_key_value_heads = test_model_config.num_key_value_heads
+        hidden_size = test_model_config.hidden_size
+        per_head_dim = hidden_size // num_attention_heads
+        print("new model config save ok in ", args.hf_model_dir)
+        print("begin export onnx")
+        export_onnx(
+            device_str=args.device_str,
+            dtype=args.dtype,
+            hf_model_dir=args.hf_model_dir,
+            onnx_model_path=args.onnx_model_path,
+            kv_cache_length=args.kv_cache_length,
+            num_hidden_layers=num_hidden_layers,
+            num_key_value_heads=num_key_value_heads,
+            per_head_dim=per_head_dim
+        )
+        print("onnx export done, save in ", args.onnx_model_path)
+        print_onnx_node_info(args.onnx_model_path)
+        if args.simplify == "true":
+            simplify_onnx(args.onnx_model_path)
+    finally:
+        print(f"\n[LOG] Log saved to: {log_path}")
+        sys.stdout = tee.terminal
+        tee.close()
