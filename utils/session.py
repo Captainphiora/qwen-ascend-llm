@@ -256,6 +256,8 @@ class AclSession(Session):
             [input_ids, mask, pos_ids], seq_length, is_dynamic, is_prefill=is_prefill
         )
         if not is_prefill:
+            if isinstance(logits, dict):
+                return logits
             return logits.reshape(self.max_batch, seq_length,-1)
         else:
             return None

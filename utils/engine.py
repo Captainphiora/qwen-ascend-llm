@@ -457,6 +457,17 @@ class ACLModel:
                 output_itemsize = self.outputs[0]["size"]
                 output_size = output_itemsize // np.dtype(self.outputs[0]["dtype"]).itemsize
             logits_shape = [self.max_batch, seq_length, self.config.vocab_size]
+
+            # 如果调用方要求保留 device 指针（用于 NPU 侧采样），跳过 D2H
+            if getattr(self, '_skip_logits_d2h', False):
+                actual_nbytes = self.max_batch * seq_length * self.config.vocab_size * np.dtype(self.outputs[0]['dtype']).itemsize
+                return {
+                    'device_ptr': self.outputs[0]["buffer"],
+                    'nbytes': actual_nbytes,
+                    'shape': logits_shape,
+                    'dtype': self.outputs[0]['dtype'],
+                }
+
             ret = acl.rt.memcpy(
                 self.outputs[0]['buffer_host'],
                 self.outputs[0]["size"],

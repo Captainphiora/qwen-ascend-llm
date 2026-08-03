@@ -51,11 +51,26 @@ class Inference:
         )
         if HAS_TORCH_NPU and config.session_type == "acl":
             self.npu_sampling_device = f"npu:{config.device_id}"
+        if self.use_npu_sampling:
+            self.session.model._skip_logits_d2h = True
+            vocab_size = config.vocab_size
+            self._npu_logits_buffer = torch.empty(
+                1, vocab_size, dtype=torch.float32,
+                device=self.npu_sampling_device
+            )
         self.reset()
         self.lock = Lock()
         self.first = True
         # self.stop_mp = {"[|Human|]":6,"[|AI|]":5,"<|assistant|>":6,"<|user|>":5}
         print("[INFO] init success")
+
+    @staticmethod
+    def _get_last_logits(logits):
+        """从 session.run() 的返回中提取最后一个 token 的 logits。
+        logits 可以是 numpy array 或 device dict。"""
+        if isinstance(logits, dict):
+            return logits
+        return logits[0][-1:]
 
 
     def generate_cache(self, prompt: str):
@@ -75,7 +90,7 @@ class Inference:
         ).reshape(1,-1)
         logits = self.session.run(input_ids)[0]
         next_token = self.sample_logits(
-            logits[0][-1:],
+            self._get_last_logits(logits),
             self.sampling_method,
             self.sampling_value,
             self.temperature
@@ -84,21 +99,16 @@ class Inference:
 
     def sample_logits(
         self,
-        logits: np.ndarray,
+        logits,
         sampling_method: str = "greedy",
         sampling_value: float = None,
         temperature: float = 1.0,
     ) -> np.ndarray:
         """
         对logits做采样，得到下一个token。
-        优先使用 NPU ATB 算子 (torch_npu.npu_top_k_top_p_sample)，
-        回退到 CPU numpy 实现。
-
-        Args:
-            logits (np.ndarray): shape [1, vocab_size], float16 or float32
-            sampling_method (str, optional): 采样方法，"greedy"/"top_p"/"top_k"
-            sampling_value (float, optional): top_p 的 p 值或 top_k 的 k 值
-            temperature (float, optional): 温度参数，0 表示 greedy
+        logits 可以是:
+          - np.ndarray [1, vocab_size] (CPU 路径)
+          - dict {'device_ptr':..., 'nbytes':..., 'shape':..., 'dtype':...} (NPU zero-copy 路径)
 
         Returns:
             np.ndarray: 下一个 token id
@@ -113,27 +123,44 @@ class Inference:
 
     def _sample_logits_npu(
         self,
-        logits: np.ndarray,
+        logits,
         sampling_method: str,
         sampling_value: float,
         temperature: float,
     ) -> np.ndarray:
         """
-        NPU ATB 采样: 使用 torch_npu.npu_top_k_top_p_sample
-        greedy 使用 CPU argmax (避免无意义的 H2D 数据搬移),
-        top_k/top_p 使用 NPU 算子加速。
+        NPU ATB 采样 (zero-copy): logits 留在 device，D2D 拷贝到 torch tensor 后采样。
+        仅回传 1 个 token id (8 bytes) 到 Host。
         """
-        if temperature == 0 or sampling_method == "greedy":
-            if logits.dtype != np.float32:
-                logits = logits.astype(np.float32)
-            return np.argmax(logits, axis=-1).astype(np.int64)
+        import acl
+        ACL_MEMCPY_DEVICE_TO_DEVICE = 3
 
-        logits_t = torch.from_numpy(np.ascontiguousarray(logits)).to(
-            self.npu_sampling_device
+        if isinstance(logits, dict):
+            device_ptr = logits['device_ptr']
+            nbytes = logits['nbytes']
+            vocab_size = logits['shape'][-1]
+        else:
+            raise ValueError("NPU sampling expects device dict, got numpy")
+
+        if temperature == 0 or sampling_method == "greedy":
+            logits_t = self._npu_logits_buffer[:, :vocab_size]
+            nbytes_dst = logits_t.nelement() * logits_t.element_size()
+            ret = acl.rt.memcpy(
+                logits_t.data_ptr(), nbytes_dst,
+                device_ptr, nbytes,
+                ACL_MEMCPY_DEVICE_TO_DEVICE
+            )
+            idx = logits_t.argmax(dim=-1)
+            return idx.cpu().numpy().flatten().astype(np.int64)
+
+        logits_t = self._npu_logits_buffer[:, :vocab_size]
+        nbytes_dst = logits_t.nelement() * logits_t.element_size()
+        ret = acl.rt.memcpy(
+            logits_t.data_ptr(), nbytes_dst,
+            device_ptr, nbytes,
+            ACL_MEMCPY_DEVICE_TO_DEVICE
         )
-        if logits_t.dtype != torch.float16:
-            logits_t = logits_t.half()
-        logits_t = logits_t / temperature
+        logits_t = (logits_t / temperature).half()
 
         if sampling_method == "top_k":
             top_k = int(sampling_value)
@@ -144,7 +171,7 @@ class Inference:
                 [1.0], dtype=torch.float16, device=self.npu_sampling_device
             )
             q = torch.rand(
-                1, logits_t.shape[-1],
+                1, vocab_size,
                 dtype=torch.float32, device=self.npu_sampling_device
             )
             idx, _ = torch_npu.npu_top_k_top_p_sample(
@@ -158,7 +185,7 @@ class Inference:
                 [sampling_value], dtype=torch.float16, device=self.npu_sampling_device
             )
             q = torch.rand(
-                1, logits_t.shape[-1],
+                1, vocab_size,
                 dtype=torch.float32, device=self.npu_sampling_device
             )
             idx, _ = torch_npu.npu_top_k_top_p_sample(
@@ -320,7 +347,7 @@ class Inference:
             )
             # 采样下一个token
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature
@@ -427,7 +454,7 @@ class Inference:
                 show_progress=prefill_show_progress
             )
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature
@@ -483,7 +510,7 @@ class Inference:
                 show_progress=prefill_show_progress
             )
             input_ids = self.sample_logits(
-                logits[0][-1:],
+                self._get_last_logits(logits),
                 self.sampling_method,
                 sampling_value,
                 temperature
