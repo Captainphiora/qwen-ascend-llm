@@ -51,16 +51,21 @@ def check_ret(str,ret):
     if ret != 0:
         print(f"return code is {ret}, detail: {str}",flush=True) 
 
-def init_resource(device_id: int):
+def init_resource(device_id: int, reuse_torch_npu_context: bool = False):
     print("[INFO] acl init")
     ret = acl.init()
     check_ret("init", ret)
     print(f"[INFO] acl set device, device_id: {device_id}")
     ret = acl.rt.set_device(device_id)
     check_ret("set_device", ret)
-    print(f"[INFO] acl create context")
-    context, ret = acl.rt.create_context(device_id)
-    check_ret("create_context", ret)
+    if reuse_torch_npu_context:
+        print(f"[INFO] acl reuse torch_npu context")
+        context, ret = acl.rt.get_context()
+        check_ret("get_context", ret)
+    else:
+        print(f"[INFO] acl create context")
+        context, ret = acl.rt.create_context(device_id)
+        check_ret("create_context", ret)
     return context
 
 def destroy_resource(device_id: int, context):

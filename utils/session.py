@@ -1,4 +1,5 @@
 import torch
+import os
 
 from config import InferenceConfig
 from utils.kvcache import create_kv_cache
@@ -9,6 +10,12 @@ import time
 import sys
 import onnxruntime as ort
 from tqdm import tqdm, trange
+
+try:
+    import torch_npu
+    HAS_TORCH_NPU = True
+except (ImportError, RuntimeError):
+    HAS_TORCH_NPU = False
 
 
 class Session:
@@ -148,7 +155,14 @@ class AclSession(Session):
         super().__init__(config)
         from utils.engine import ACLModel, init_resource
         self.device_id = config.device_id
-        self.context = init_resource(self.device_id)
+        reuse_ctx = (
+            os.environ.get("USE_NPU_SAMPLING", "0") == "1"
+            and HAS_TORCH_NPU
+        )
+        if reuse_ctx:
+            torch.npu.set_device(config.device_id)
+        self.context = init_resource(self.device_id, reuse_torch_npu_context=reuse_ctx)
+        self._reuse_torch_npu_context = reuse_ctx
         self.model = ACLModel(config, self.context)
         self.max_batch = config.max_batch
         self.input_ids = np.zeros((1,16),dtype=np.int64)
@@ -175,10 +189,7 @@ class AclSession(Session):
             pass
 
         if _torch_npu_used:
-            import atexit, sys, os
-            def _suppress_torch_npu_exit_noise():
-                sys.stderr = open(os.devnull, 'w')
-            atexit.register(_suppress_torch_npu_exit_noise)
+            pass
         else:
             if getattr(self, "model", None) is not None:
                 self.model.unload()
