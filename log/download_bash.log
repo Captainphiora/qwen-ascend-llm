@@ -1,28 +1,0 @@
-/usr/local/lib/python3.9/site-packages/huggingface_hub/file_download.py:1150: FutureWarning: `resume_download` is deprecated and will be removed in version 1.0.0. Downloads always resume when possible. If you want to force a new download, use `force_download=True`.
-  warnings.warn(
-Fetching 9 files:   0%|          | 0/9 [00:00<?, ?it/s]Ignored metadata for 'LICENSE' (outdated). Will re-compute hash.
-Ignored metadata for 'README.md' (outdated). Will re-compute hash.
-Ignored metadata for 'config.json' (outdated). Will re-compute hash.
-Ignored metadata for 'generation_config.json' (outdated). Will re-compute hash.
-Ignored metadata for 'figures/benchmark.jpg' (outdated). Will re-compute hash.
-Ignored metadata for '.gitattributes' (outdated). Will re-compute hash.
-Ignored metadata for 'tokenizer.json' (outdated). Will re-compute hash.
-Downloading 'README.md' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/README.md.1ae2b2ccda9cb58fb4179e30c1798b6e75980618.incomplete'
-Downloading 'tokenizer.json' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/tokenizer.json.a34650995da6939a945c330eadb0687147ac3ef8.incomplete'
-Downloading 'LICENSE' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/LICENSE.d42fae903e9fa07f3e8edb0db00a8d905ba49560.incomplete'
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/README.md
-Ignored metadata for 'tokenizer_config.json' (outdated). Will re-compute hash.
-Downloading 'tokenizer_config.json' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/tokenizer_config.json.9967ff32d94b21c94dc7e2b3bcbea295a46cde50.incomplete'
-Downloading '.gitattributes' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/.gitattributes.a6344aac8c09253b3b630fb776ae94478aa0275b.incomplete'
-Downloading 'figures/benchmark.jpg' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/figures/benchmark.jpg.d1fd67ec1bf748c24b244b6efd825ded1b147787.incomplete'
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer_config.json
-Downloading 'model.safetensors' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/model.safetensors.58858233513d76b8703e72eed6ce16807b523328188e13329257fb9594462945.incomplete' (resume from 377487360/3554214621)
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/LICENSE
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/tokenizer.json
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/.gitattributes
-Fetching 9 files:  11%|█         | 1/9 [00:08<01:07,  8.46s/it]Downloading 'generation_config.json' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/generation_config.json.052ab54633116a634da950ab483233c4ace0aa82.incomplete'
-Downloading 'config.json' to '../models/DeepSeek-R1-Distill-Qwen-1.5B/.cache/huggingface/download/config.json.68c044b63c894bc0c3d334a44bed2856d6d6815d.incomplete'
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/generation_config.json
-Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/config.json
-Fetching 9 files:  44%|████▍     | 4/9 [00:10<00:10,  2.11s/it]Download complete. Moving file to ../models/DeepSeek-R1-Distill-Qwen-1.5B/figures/benchmark.jpg
-Fetching 9 files:  56%|█████▌    | 5/9 [00:15<00:11,  2.88s/it]
