@@ -54,7 +54,8 @@ cd "$SCRIPT_DIR"
 MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 KV_CACHE_LENGTH=4096
-MAX_PREFILL_LENGTH=8
+MAX_PREFILL_LENGTH=1
+DEVICE_ID=7
 DEVICE_STR="npu"
 DTYPE="float16"
 SIMPLIFY="false"
@@ -70,15 +71,19 @@ for arg in "$@"; do
         --modeling=*) MODELING_VERSION="${arg#*=}" ;;
         --kv_cache_length=*) KV_CACHE_LENGTH="${arg#*=}" ;;
         --max_prefill_length=*) MAX_PREFILL_LENGTH="${arg#*=}" ;;
+        --device_id=*) DEVICE_ID="${arg#*=}" ;;
         --simplify) SIMPLIFY="true" ;;
         --soc=*) SOC_VERSION="${arg#*=}" ;;
         --skip-om) SKIP_OM=true ;;
         --help|-h)
-            sed -n '2,40p' "$0"
+            sed -n '2,42p' "$0"
             exit 0
             ;;
     esac
 done
+
+# 设置 NPU 设备 (导出 ONNX 时需要)
+export ASCEND_RT_VISIBLE_DEVICES=$DEVICE_ID
 
 # 映射 modeling 版本到文件
 case "$MODELING_VERSION" in
