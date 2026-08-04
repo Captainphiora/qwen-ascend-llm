@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-# 脚本1: ONNX + OM 模型导出
-# 使用不同的 modeling_qwen2 文件导出 ONNX，再编译为 OM 模型
+# 脚本1: ONNX + change_node + OM 模型导出
+# 完整流程: 导出 ONNX → change_node 图改写 → 编译 OM
 #
 # 使用方式:
 #   bash scripts/1_export_onnx.sh                                    # 默认配置
@@ -9,31 +9,34 @@
 #   bash scripts/1_export_onnx.sh --modeling=baseline                # baseline 对比
 #   bash scripts/1_export_onnx.sh --max_prefill_length=8             # 设置 prefill 长度
 #   bash scripts/1_export_onnx.sh --simplify                         # 启用 onnxsim
-#   bash scripts/1_export_onnx.sh --skip-om                          # 仅导出 ONNX，不编译 OM
+#   bash scripts/1_export_onnx.sh --soc=Ascend310B1                  # 310B 编译
+#   bash scripts/1_export_onnx.sh --skip-om                          # 仅导出 ONNX，不做 change_node 和 OM
 #
-# 可用 modeling 版本:
-#   baseline              - 原始 modeling (export/modeling_qwen2.py)
-#   v2_kvcache            - KV Cache 重构 (export/modeling_qwen2_v2_kvcache.py)
-#   v3_kvcache_noslice    - KV Cache 6D 无 Slice (export/modeling_qwen2_v3_kvcache_noslice.py)
-#   v4_noexpand           - KV Cache 6D + GQA broadcast (export/modeling_qwen2_v4_noexpand.py)
+# 可用 modeling 版本 (对应 change_node 脚本自动匹配):
+#   baseline              - export/modeling_qwen2.py + export/change_node.py
+#   v2_kvcache            - export/modeling_qwen2_v2_kvcache.py + export/change_node_v2_kvcache.py
+#   v3_kvcache_noslice    - export/modeling_qwen2_v3_kvcache_noslice.py + export/change_node_v3_kvcache_noslice.py
+#   v4_noexpand           - export/modeling_qwen2_v4_noexpand.py + export/change_node_v4_noexpand.py
+#                           (310B 自动使用 change_node_v4_noexpand_310b.py)
 #
 # 示例:
-#   # 完整流程: 导出 v4_noexpand ONNX + 编译 OM (prefill=1)
+#   # 完整流程: v4_noexpand, prefill=1, 910 芯片
 #   bash scripts/1_export_onnx.sh --modeling=v4_noexpand --kv_cache_length=4096 --max_prefill_length=1
 #
-#   # 导出 baseline ONNX + OM (prefill=8, 带 simplify)
-#   bash scripts/1_export_onnx.sh --modeling=baseline --max_prefill_length=8 --simplify
+#   # 310B 芯片, prefill=1
+#   bash scripts/1_export_onnx.sh --modeling=v4_noexpand --soc=Ascend310B1 --max_prefill_length=1
 #
-#   # 仅导出 ONNX 不编译 OM
+#   # 带 simplify, prefill=8
+#   bash scripts/1_export_onnx.sh --modeling=v4_noexpand --max_prefill_length=8 --simplify
+#
+#   # 仅导出 ONNX (不做 change_node 和 OM 编译)
 #   bash scripts/1_export_onnx.sh --modeling=v4_noexpand --skip-om
 #
-#   # 指定 SOC (310B)
-#   bash scripts/1_export_onnx.sh --modeling=v4_noexpand --soc=Ascend310B1
-#
 # 输出:
-#   ONNX: ./output/onnx_<MODEL>_<KV_LEN>/<MODEL>_<KV_LEN>.onnx
-#   OM:   ./output/om_<MODEL>_<KV_LEN>_<PREFILL>[_sim].om
-#   日志: scripts/logs/1_export_<modeling>_<timestamp>.log
+#   ONNX (raw):     ./output/onnx_<MODEL>_<KV_LEN>/<MODEL>_<KV_LEN>.onnx
+#   ONNX (changed): ./output/onnx_changed_<modeling>/<MODEL>_<KV_LEN>.onnx
+#   OM:             ./output/om_<modeling>/<MODEL>_<KV_LEN>_<PREFILL>[_sim].om
+#   日志:           scripts/logs/1_export_<modeling>_<timestamp>.log
 #
 # OM 文件命名规则:
 #   <MODEL>_<kv_cache_length>_<max_prefill_length>[_sim].om
@@ -51,7 +54,7 @@ cd "$SCRIPT_DIR"
 MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 KV_CACHE_LENGTH=4096
-MAX_PREFILL_LENGTH=1
+MAX_PREFILL_LENGTH=8
 DEVICE_STR="npu"
 DTYPE="float16"
 SIMPLIFY="false"
@@ -152,14 +155,44 @@ echo "" | tee -a "$LOG_FILE"
 echo ">>> ONNX 导出完成: ${ONNX_MODEL_PATH}" | tee -a "$LOG_FILE"
 
 # ============================================================
-# Step 2: 编译 OM
+# Step 2: change_node (ONNX 图改写)
 # ============================================================
 if [ "$SKIP_OM" = false ]; then
+    # 映射 change_node 脚本
+    case "$MODELING_VERSION" in
+        baseline)           CHANGE_NODE_FILE="export/change_node.py" ;;
+        v2_kvcache)         CHANGE_NODE_FILE="export/change_node_v2_kvcache.py" ;;
+        v3_kvcache_noslice) CHANGE_NODE_FILE="export/change_node_v3_kvcache_noslice.py" ;;
+        v4_noexpand)
+            if [ "$SOC_VERSION" = "Ascend310B1" ]; then
+                CHANGE_NODE_FILE="export/change_node_v4_noexpand_310b.py"
+            else
+                CHANGE_NODE_FILE="export/change_node_v4_noexpand.py"
+            fi
+            ;;
+    esac
+
+    ONNX_CHANGED_DIR="./output/onnx_changed_${MODELING_VERSION}"
+    ONNX_CHANGED_PATH="${ONNX_CHANGED_DIR}/${MODEL_NAME}_${KV_CACHE_LENGTH}.onnx"
+    mkdir -p "$ONNX_CHANGED_DIR"
+
     echo "" | tee -a "$LOG_FILE"
-    echo ">>> [Step 2] 编译 OM (max_prefill_length=${MAX_PREFILL_LENGTH})..." | tee -a "$LOG_FILE"
+    echo ">>> [Step 2] change_node 图改写: ${CHANGE_NODE_FILE}" | tee -a "$LOG_FILE"
+    python3 "$CHANGE_NODE_FILE" \
+        --input_model_path "$ONNX_MODEL_PATH" \
+        --output_model_path "$ONNX_CHANGED_PATH" \
+        2>&1 | tee -a "$LOG_FILE"
+
+    echo ">>> change_node 完成: ${ONNX_CHANGED_PATH}" | tee -a "$LOG_FILE"
+
+    # ============================================================
+    # Step 3: 编译 OM
+    # ============================================================
+    echo "" | tee -a "$LOG_FILE"
+    echo ">>> [Step 3] 编译 OM (max_prefill_length=${MAX_PREFILL_LENGTH})..." | tee -a "$LOG_FILE"
 
     python3 export/onnx2om.py \
-        --onnx_model_path "$ONNX_MODEL_PATH" \
+        --onnx_model_path "$ONNX_CHANGED_PATH" \
         --om_model_path "$OM_MODEL_PATH" \
         --hf_model_dir "$HF_MODEL_DIR" \
         --kv_cache_length "$KV_CACHE_LENGTH" \
