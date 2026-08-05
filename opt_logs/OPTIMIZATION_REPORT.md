@@ -8,6 +8,8 @@
 
 ## 一、端到端性能演进
 
+> **注：** 算子总耗时 = profiling 采集期间（20 tokens 推理，约 29 次前向传播）所有算子执行的累计耗时。单次前向 ≈ 总耗时 / 29。
+
 | 版本 | 算子总耗时 | TPOT | Decode 速度 | TTFT | vs baseline | 递进提升 |
 |------|-----------|------|-------------|------|-------------|---------|
 | v0_baseline | 241.13ms | 8.92ms | 112.1 tok/s | 150.0ms | — | — |
@@ -84,16 +86,21 @@
 **在 v0 基础上新增的改动：** 仅修改 ONNX 后处理脚本（change_node），不改 modeling。
 
 **消除的算子模式（每层 Q/K 各一次，共 56 处）：**
+
+> 下面用 `算子(输入) → 输出名` 表示 ONNX 图中的数据流。
+
 ```
-Slice(x, :64) → x1
-Slice(x, 64:) → x2          ← 2个Slice消除
-Neg(x2) → -x2               ← 1个Neg消除
-Concat(-x2, x1) → rot       ← 1个Concat消除
-Mul(x, cos) → a             ← 1个Mul消除
-Mul(rot, sin) → b           ← 1个Mul消除
-Add(a, b) → output          ← 1个Add消除
+输入: x (Q或K投影后的张量, shape [1, heads, seq, 128])
+
+Slice(x, dim=-1, [0:64])   → x1       # 取前半维度 x[..., :64]
+Slice(x, dim=-1, [64:128]) → x2       # 取后半维度 x[..., 64:]
+Neg(x2)                    → neg_x2   # 对后半取负 -x2
+Concat(neg_x2, x1, dim=-1) → rot_x    # 拼接为 [-x2, x1], 即 rotate_half(x)
+Mul(x, cos_embed)          → a        # x 乘 cos 位置编码
+Mul(rot_x, sin_embed)      → b        # rotate_half(x) 乘 sin 位置编码
+Add(a, b)                  → output   # 最终结果: x*cos + rotate_half(x)*sin
 ```
-**替换为：** `NPURotaryPositionEmbedding(x, cos, sin)` 单算子
+**替换为：** `NPURotaryPositionEmbedding(x, cos_embed, sin_embed) → output` 单算子，7→1
 
 **净效果：**
 - 消除: 112 Slice + 56 Neg + 56 Concat + 112 Mul + 56 Add = 392 节点
