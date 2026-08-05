@@ -8,7 +8,11 @@
 
 ## 一、端到端性能演进
 
-> **注：** 算子总耗时 = profiling 采集期间（20 tokens 推理，约 29 次前向传播）所有算子执行的累计耗时。单次前向 ≈ 总耗时 / 29。
+> **注：** 算子总耗时 = profiling 采集期间所有算子执行的累计耗时。采集参数：prompt="你好，请介绍一下你自己"（约 9 tokens），max_new_tokens=20，max_prefill_length=1。因为 prefill 逐 token 处理，共执行约 9(prefill) + 20(decode) = 29 次 model forward。单次 decode forward ≈ 算子总耗时 / 29。
+>
+> **Benchmark 参数：** prompt="请详细介绍一下机器学习的基本概念和常用算法"（16 tokens），max_new_tokens=30，greedy sampling，3轮取平均。
+> - TTFT = 从推理开始到第一个输出 token 产生的耗时（包含 16 次 prefill forward）
+> - TPOT = decode 阶段每生成一个 token 的平均耗时（= decode 总时间 / (生成token数-1)）
 
 | 版本 | 算子总耗时 | TPOT | Decode 速度 | TTFT | vs baseline | 递进提升 |
 |------|-----------|------|-------------|------|-------------|---------|
