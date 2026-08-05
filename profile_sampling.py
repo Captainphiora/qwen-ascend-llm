@@ -103,8 +103,9 @@ def profile_inference(infer_engine, prompt, max_new_tokens, sampling_method,
 
         # Sampling
         t_sample_start = time.perf_counter()
+        last_logits = infer_engine._get_last_logits(logits)
         next_token = infer_engine.sample_logits(
-            logits[0][-1:], sampling_method, sampling_value, temperature
+            last_logits, sampling_method, sampling_value, temperature
         )
         t_sample_end = time.perf_counter()
 
@@ -326,8 +327,10 @@ def main():
     for label, method, value, temp, use_npu in test_configs:
         if use_npu:
             infer_engine.use_npu_sampling = True
+            infer_engine.session.model._skip_logits_d2h = True
         else:
             infer_engine.use_npu_sampling = False
+            infer_engine.session.model._skip_logits_d2h = False
 
         result = profile_inference(infer_engine, args.prompt, args.max_new_tokens, method, value, temp)
         results[label] = result
