@@ -29,20 +29,26 @@
 - **局限：** `RotaryPositionEmbedding` 算子在 310B 上不支持，310B 需跳过此优化
 - **收益：** 算子总耗时 -3.0%
 
-#### 2. KV Cache 6D 重构（v3_kvcache_noslice）— 910 和 310B 均可用
+#### 2. KV Cache 5D 重构（v2_kvcache）— 910 和 310B 均可用
 
-- **原理：** 将 KV Cache 张量从 `[1, kv_len, 112, 128]` reshape 为 `[1, 28, 2, 2, kv_len, 128]`（6D），每层通过常量索引 Gather 获取自己的 K/V，完全消除 StridedSliceD
-- **改动位置：** `export/modeling_qwen2_v3_kvcache_noslice.py`（PyTorch 模型导出文件）
-- **关键改动：**
-  - `Qwen2Model.forward()`: `permute(0,2,1,3).view(1, num_layers, 2, num_kv_heads, -1, head_dim)`
-  - `Qwen2Attention.forward()`: `past_key_value[:, layer_idx, 0]` / `[:, layer_idx, 1]`
-- **收益：** StridedSliceD 48.94ms → 0（完全消除）
+- **原理：** 将 KV Cache 从 `[1, kv_len, 112, 128]` permute+view 为 5D `[1, 28, 4, kv_len, 128]`，每层通过 `past_key_value[:, layer_idx]`（Gather 常量索引）获取，避免对 112-head 维度的大范围 StridedSlice
+- **改动位置：** `export/modeling_qwen2_v2_kvcache.py`
+- **局限：** 层内 K/V 拆分仍需小范围 Slice（`layer_kv[:, :2]` / `[:, 2:]`）
+- **收益：** 算子总耗时 -6.5%, ConcatD -64.5%
 
-#### 3. GQA Broadcast 消除 Expand（v4_noexpand）— 910 和 310B 均可用
+#### 3. KV Cache 6D 重构（v3_kvcache_noslice）— 910 和 310B 均可用
+
+- **原理：** 在 v2 基础上进一步将 5D 拆为 6D `[1, 28, 2, 2, kv_len, 128]`，K/V 分别通过 `past_key_value[:, layer_idx, 0]` / `[:, layer_idx, 1]` 获取（两次 Gather），完全消除 StridedSliceD
+- **改动位置：** `export/modeling_qwen2_v3_kvcache_noslice.py`
+- **收益：** StridedSliceD 48.94ms → 0（完全消除），算子总耗时 -15.8%
+
+#### 4. GQA Broadcast 消除 Expand（v4_noexpand）— 910 和 310B 均可用
 
 - **原理：** 用 grouped matmul broadcast 替代 `repeat_kv` 的显式 expand。Q reshape 为 `[b, kv_heads, groups, q, d]`，K/V unsqueeze 为 `[b, kv_heads, 1, kv, d]`，MatMul 自动 broadcast
 - **改动位置：** `export/modeling_qwen2_v4_noexpand.py`（继承 v3 全部改动）
-- **收益：** Expand 11.61ms → 0（完全消除），额外减少 1792 ONNX 节点
+- **收益：** Expand 11.61ms → 0（完全消除），额外减少 1792 ONNX 节点，累计 Decode +25.5%
+
+**文件命名说明：** modeling 文件从 v2 开始编号，因为 v1_rope 不修改 modeling（仅改 change_node 后处理脚本），baseline 的 `modeling_qwen2.py` 无变化。版本号含义是"第几版 modeling 改动"。
 
 ### 平台差异
 
