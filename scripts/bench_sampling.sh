@@ -13,14 +13,19 @@
 #   bash scripts/bench_sampling.sh --prof-only  # 仅 Part 2+3
 #   bash scripts/bench_sampling.sh --no-acl     # 跳过 Part 3 (ACL算子profiling)
 #   bash scripts/bench_sampling.sh --device_id=5
+#   bash scripts/bench_sampling.sh --device_id=5 --npu-sampling
 # ============================================================
 
 set -e
 
 # ---- 配置参数 (按需修改) ----
-DEVICE_ID=7
-OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
-HF_MODEL_DIR="/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
+DEVICE_ID=6
+# OM_MODEL_PATH="output/om_v4_noexpand/DeepSeek-R1-Distill-Qwen-1.5B_4096_8.om"
+# OM_MODEL_PATH="opt_models/v4_noexpand/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand.om"
+# OM_MODEL_PATH="output/no_rope/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_no_rope.om"
+OM_MODEL_PATH="output/no_rope/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_no_rope_sim.om"
+# OM_MODEL_PATH="opt_models/v0_baseline/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v0_baseline.om"
+HF_MODEL_DIR="../models/DeepSeek-R1-Distill-Qwen-1.5B"
 KV_CACHE_LENGTH=4096
 MAX_PREFILL_LENGTH=1
 PROMPT="请详细介绍一下机器学习的基本概念和常用算法"

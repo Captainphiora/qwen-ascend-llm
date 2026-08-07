@@ -152,6 +152,8 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=100)
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--npu-only", action="store_true", default=False,
+                        help="只运行 NPU 采样测试，跳过 CPU 采样")
     args = parser.parse_args()
 
     from config import InferenceConfig
@@ -189,12 +191,14 @@ def main():
 
     # Test configurations
     # NPU ATB 测试需要设置 USE_NPU_SAMPLING=1 (会产生退出时的 harmless warning)
-    test_configs = [
-        ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, False),
-        ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
-        ("Top-p=0.95 (CPU numpy)", "top_p", 0.95, 0.7, False),
-        ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
-    ]
+    test_configs = []
+    if not args.npu_only:
+        test_configs = [
+            ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, False),
+            ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
+            ("Top-p=0.95 (CPU numpy)", "top_p", 0.95, 0.7, False),
+            ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
+        ]
     if npu_sampling_available and infer_engine.use_npu_sampling:
         test_configs.extend([
             ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True),

@@ -14,8 +14,11 @@
 > - TTFT = 从推理开始到第一个输出 token 产生的耗时（包含 16 次 prefill forward）
 > - TPOT = decode 阶段每生成一个 token 的平均耗时（= decode 总时间 / (生成token数-1)）
 
-| 版本 | 算子总耗时 | TPOT | Decode 速度 | TTFT | vs baseline | 递进提升 |
+| 版本 | 算子总耗时 | TPOT | Decode 速度 | TTFT | vs OM baseline | 递进提升 |
 |------|-----------|------|-------------|------|-------------|---------|
+| vLLM V0+Eager | — | 27.62ms | 36.2 tok/s | 77.7ms | -67.7% | — |
+| vLLM V1+Eager | — | 27.71ms | 36.1 tok/s | 69.6ms | -67.8% | -0.3% |
+| vLLM V1+ACL Graph | — | 16.01ms | 62.5 tok/s | 53.2ms | -44.2% | +73.1% |
 | v0_baseline | 241.13ms | 8.92ms | 112.1 tok/s | 150.0ms | — | — |
 | v1_rope | 233.85ms | 8.85ms | 112.9 tok/s | 150.5ms | +0.7% | +0.7% |
 | v2_kvcache | 225.46ms | 8.57ms | 116.6 tok/s | 146.7ms | +4.0% | +3.3% |
@@ -223,3 +226,49 @@ RoPE             █░░░░░░░░░░░░░░░░░░░░
 3. **ConcatD**（原占 8.5%）→ 降至 4.1%（剩余为不可消除的 KV Cache seq 拼接）
 
 最终模型在推理时的算力利用率显著提升——75.8% 的时间花在核心 MatMul 计算上，非计算开销仅占 24.2%（其中 8.6% 为 Gather 索引，是 KV Cache 重构引入的必要代价）。
+
+## 八、vLLM-Ascend 推理性能对比
+
+### 8.1 实验环境
+
+| 项目 | 配置 |
+|------|------|
+| 框架 | vLLM 0.18.0 + vllm-ascend 0.18.0 (A3 variant) |
+| PyTorch | torch 2.9.0 + torch-npu 2.9.0.post2 |
+| 加速组件 | torchair (图编译) + triton-ascend 3.2.1 |
+| 硬件 | Ascend 910 (A3), 单卡, CANN 9.0.0 |
+| 模型 | DeepSeek-R1-Distill-Qwen-1.5B (FP16) |
+| 服务方式 | OpenAI-compatible API server (TP=1) |
+
+**Benchmark 参数：** prompt="请详细介绍一下机器学习的基本概念和常用算法"，max_new_tokens=100，3 轮取平均。
+
+### 8.2 vLLM-Ascend 消融实验
+
+| 配置 | TPOT (ms) | Decode (tok/s) | 说明 |
+|------|-----------|----------------|------|
+| V0 引擎 + Eager | 27.62 | 36.2 | 逐算子调度，无图编译 |
+| V1 引擎 + Eager | 27.71 | 36.1 | 异步调度，无图编译 |
+| V1 引擎 + ACL Graph | 16.01 | 62.5 | 异步调度 + 静态图编译 |
+
+**结论：** 单请求场景下，V1 引擎的异步调度对 decode 性能无提升（36.2 vs 36.1 tok/s），性能增益完全来自 ACL Graph 图编译（36.1 → 62.5 tok/s，+73%）。
+
+
+
+### 8.3 分析
+
+**OM 模型 decode 速度为 vLLM-Ascend 的 1.8~2.3 倍**，原因：
+
+1. **图编译深度不同：** OM 是完全离线编译的静态图，编译器有充足时间做全局算子融合、tiling 优化和内存布局规划；vLLM ACL Graph 是运行时 JIT 编译，优化程度有限。
+
+2. **运行时开销：** vLLM 每步 decode 仍有 Python 调度开销（scheduler dispatch、KV cache 管理、采样逻辑），OM 方案的推理路径几乎纯 C++/NPU。
+
+3. **KV Cache 管理策略：** vLLM 使用 PagedAttention（按 block 索引），引入 block_table 查找开销；OM 使用连续 KV Cache，内存访问模式更简单。
+
+4. **采样策略影响：** OM 的 Top-p/Top-k 采样在 CPU 端执行（numpy），引入额外 2ms/token 开销，导致从 111 降到 ~92 tok/s；vLLM 的采样在 NPU 端统一处理，不同采样策略对 decode 速度影响 <5%。
+
+**vLLM-Ascend 的优势场景：**
+
+- 多并发在线服务（continuous batching）
+- 动态长度输入（无需预编译多种 shape）
+- 快速迭代部署（无需 ONNX 导出 + OM 编译流程）
+- 首 token 延迟更低（TTFT ~53ms vs OM ~150ms，因 chunked prefill + 高效 prefill 实现）
