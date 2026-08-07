@@ -88,6 +88,13 @@ def parser_arguments():
         choices=["true", "false"],
         default="false",
     )
+    parser.add_argument(
+        "--quantize",
+        help="quantize mode: none, W8X8, W8A16",
+        type=str,
+        choices=["none", "W8X8", "W8A16"],
+        default="none",
+    )
     return parser.parse_args()
 
 
@@ -148,6 +155,7 @@ def export_onnx(
     num_hidden_layers: int,
     num_key_value_heads: int,
     per_head_dim: int,
+    quantize_mode: str = "none",
 ):
     if device_str == "npu":
         import torch_npu
@@ -166,24 +174,40 @@ def export_onnx(
         # trust_remote_code=True
     ).to(device)
     quantize_cfg = {
-        "query_key_value": {
+        "q_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense": {
+        "k_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense_h_to_4h": {
+        "v_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense_4h_to_h": {
+        "o_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "gate_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "up_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "down_proj": {
             "type": "W8X8",
             "act_scale": False
         }
     }
-    quantize_cfg = {}
+    if quantize_mode == "none":
+        quantize_cfg = {}
+    elif quantize_mode == "W8A16":
+        for key in quantize_cfg:
+            quantize_cfg[key]["type"] = "W8A16"
     input_names = [
         "input_ids",
         "attention_mask",
@@ -228,9 +252,10 @@ def export_onnx(
     )
     model.eval()
     with torch.no_grad():
-        # from quantize import quantize
-        # quantize(model, cfg=quantize_cfg)
-        # print(model)
+        if quantize_cfg:
+            from quantize.quantize_linear import quantize_model
+            quantize_model(model, cfg=quantize_cfg)
+            print(f"[INFO] Model quantized with mode: {quantize_mode}")
         torch.onnx.export(
             model,
             f=onnx_model_path,
@@ -298,7 +323,8 @@ if __name__ == "__main__":
             kv_cache_length=args.kv_cache_length,
             num_hidden_layers=num_hidden_layers,
             num_key_value_heads=num_key_value_heads,
-            per_head_dim=per_head_dim
+            per_head_dim=per_head_dim,
+            quantize_mode=args.quantize,
         )
         print("onnx export done, save in ", args.onnx_model_path)
         print_onnx_node_info(args.onnx_model_path)

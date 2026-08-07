@@ -91,6 +91,19 @@ parser.add_argument(
     type=int,
     default=2048,
 )
+parser.add_argument(
+    "--enable_compress_weight",
+    help="enable weight compression for bandwidth optimization (Ascend 910 only)",
+    type=str,
+    choices=["true", "false"],
+    default="false",
+)
+parser.add_argument(
+    "--compression_optimize_conf",
+    help="path to compression_optimize.cfg for calibration-based PTQ",
+    type=str,
+    default="",
+)
 
 
 args = parser.parse_args()
@@ -220,6 +233,12 @@ try:
             ",".join(past_key_values_shape)
         ),
     ]
+    if args.enable_compress_weight == "true":
+        command_lines.append("--enable_compress_weight=true")
+    if args.compression_optimize_conf:
+        command_lines.append(
+            "--compression_optimize_conf={}".format(args.compression_optimize_conf)
+        )
     if max_prefill_length > 1:
         command_lines.append(
             "--dynamic_dims \"{}\"".format(";".join(dynamic_dims))
