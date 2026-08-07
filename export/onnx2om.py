@@ -104,6 +104,13 @@ parser.add_argument(
     type=str,
     default="",
 )
+parser.add_argument(
+    "--disable_constant_folding",
+    help="disable ATC constant folding (needed for quantized models with INT8 weights)",
+    type=str,
+    choices=["true", "false"],
+    default="false",
+)
 
 
 args = parser.parse_args()
@@ -239,6 +246,8 @@ try:
         command_lines.append(
             "--compression_optimize_conf={}".format(args.compression_optimize_conf)
         )
+    if args.disable_constant_folding == "true":
+        command_lines.append("--oo_constant_folding=false")
     if max_prefill_length > 1:
         command_lines.append(
             "--dynamic_dims \"{}\"".format(";".join(dynamic_dims))
