@@ -39,22 +39,31 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # ---- 默认配置 ----
-MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+# MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+# MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B-OrangePi-W8A8/deepseek-qwen-1.5B-w8a8"
+
+# HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
+# models/DeepSeek-R1-Distill-Qwen-1.5B-OrangePi-W8A8/deepseek-qwen-1.5B-w8a8
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
 KV_CACHE_LENGTH=4096
 MAX_PREFILL_LENGTH=1
 DEVICE_STR="npu"
 DTYPE="float16"
-# SIMPLIFY=false
-SIMPLIFY=true
+SIMPLIFY=false
+# SIMPLIFY=true
 SKIP_OM=false
 SOC_VERSION="auto"
 # SOC_VERSION="Ascend310B1"
-CPU_THREAD=1
+CPU_THREAD=16
 MODELING_FILE=""
 # CHANGE_NODE_FILE="export/change_node.py"
-CHANGE_NODE_FILE="export/change_node_v4_noexpand_310b.py"
-VERSION="no_rope"
+# CHANGE_NODE_FILE="export/change_node_v4_noexpand_310b.py"
+CHANGE_NODE_FILE="export/change_node_v4_noexpand.py"
+VERSION="910_w8a8_noexpand"
+# QUANTIZE_MODE="none"
+QUANTIZE_MODE="W8A8"
+NPU_ID="12"
 # ---- 配置结束 ----
 
 # 解析参数
@@ -71,6 +80,8 @@ for arg in "$@"; do
         --cpu_thread=*) CPU_THREAD="${arg#*=}" ;;
         --version=*) VERSION="${arg#*=}" ;;
         --simplify=*) SIMPLIFY="${arg#*=}" ;;
+        --quantize=*) QUANTIZE_MODE="${arg#*=}" ;;
+        --npu_id=*) NPU_ID="${arg#*=}" ;;
         --skip_om) SKIP_OM=true ;;
         --help|-h)
             sed -n '2,36p' "$0"
@@ -194,6 +205,7 @@ fi
 # ============================================================
 # Step 1: PyTorch → ONNX (export_onnx.py)
 # ============================================================
+export ASCEND_RT_VISIBLE_DEVICES="$NPU_ID"
 if [ -f "$ONNX_RAW_PATH" ]; then
     echo "[Step 1] 已存在，跳过: $ONNX_RAW_PATH"
 else
@@ -204,13 +216,14 @@ else
         --hf_model_dir "$HF_MODEL_DIR" \
         --onnx_model_path "$ONNX_RAW_PATH" \
         --kv_cache_length "$KV_CACHE_LENGTH" \
-        --simplify false
+        --simplify false \
+        --quantize "$QUANTIZE_MODE"
     echo "[Step 1] 完成: $ONNX_RAW_PATH"
 fi
 echo ""
 
 # ============================================================
-# Step 2: change_node
+# Step 2: change_node (RoPE fusion)
 # ============================================================
 if [ -f "$ONNX_CHANGED_PATH" ]; then
     echo "[Step 2] 已存在，跳过: $ONNX_CHANGED_PATH"
@@ -224,9 +237,32 @@ fi
 echo ""
 
 # ============================================================
+# Step 2.5: change_node_quant (W8A8 量化图改写, 仅 --quantize=W8A8)
+# ============================================================
+ONNX_AFTER_QUANT="$ONNX_CHANGED_PATH"
+if [ "$QUANTIZE_MODE" = "W8A8" ]; then
+    ONNX_QUANT_DIR="${OUTPUT_BASE}/onnx_quant"
+    ONNX_QUANT_PATH="${ONNX_QUANT_DIR}/${ONNX_FILENAME}"
+    mkdir -p "$ONNX_QUANT_DIR"
+    if [ -f "$ONNX_QUANT_PATH" ]; then
+        echo "[Step 2.5] 已存在，跳过: $ONNX_QUANT_PATH"
+    else
+        SAFETENSORS_PATH="${HF_MODEL_DIR}/model.safetensors"
+        echo "[Step 2.5] 执行 change_node_quant (per-layer input_scale)"
+        python3 export/quantize/change_node_quant.py \
+            --input_model_path "$ONNX_CHANGED_PATH" \
+            --output_model_path "$ONNX_QUANT_PATH" \
+            --quant_model_path "$SAFETENSORS_PATH"
+        echo "[Step 2.5] 完成: $ONNX_QUANT_PATH"
+    fi
+    ONNX_AFTER_QUANT="$ONNX_QUANT_PATH"
+fi
+echo ""
+
+# ============================================================
 # Step 3: Simplify (由 --simplify=true/false 控制)
 # ============================================================
-ONNX_FOR_OM="$ONNX_CHANGED_PATH"
+ONNX_FOR_OM="$ONNX_AFTER_QUANT"
 
 if [ "$SIMPLIFY" = "true" ]; then
     if [ -f "$ONNX_CHANGED_SIM_PATH" ]; then
@@ -234,7 +270,7 @@ if [ "$SIMPLIFY" = "true" ]; then
     else
         echo "[Step 3] ONNX Simplify..."
         python3 export/simplify_onnx.py \
-            --input "$ONNX_CHANGED_PATH" \
+            --input "$ONNX_AFTER_QUANT" \
             --output "$ONNX_CHANGED_SIM_PATH"
         echo "[Step 3] 完成: $ONNX_CHANGED_SIM_PATH"
     fi

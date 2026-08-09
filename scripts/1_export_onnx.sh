@@ -29,18 +29,24 @@
 
 set -e
 source ~/.bashrc_cann900
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate qwen_ascend_cann900
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # ---- 默认配置 ----
-MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+# MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B-OrangePi-W8A8/deepseek-qwen-1.5B-w8a8"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/${MODEL_NAME}"
+
 KV_CACHE_LENGTH=4096
 DEVICE_STR="npu"
 DTYPE="float16"
 SIMPLIFY="false"
 MODELING_VERSION="v4_noexpand"
+QUANTIZE_MODE="none"
+NPU_ID="0"
 # ---- 配置结束 ----
 
 # 解析参数
@@ -48,6 +54,8 @@ for arg in "$@"; do
     case "$arg" in
         --modeling=*) MODELING_VERSION="${arg#*=}" ;;
         --kv_cache_length=*) KV_CACHE_LENGTH="${arg#*=}" ;;
+        --quantize=*) QUANTIZE_MODE="${arg#*=}" ;;
+        --npu_id=*) NPU_ID="${arg#*=}" ;;
         --simplify) SIMPLIFY="true" ;;
         --help|-h)
             sed -n '2,30p' "$0"
@@ -95,7 +103,8 @@ if [ "$MODELING_FILE" != "$EXPORT_MODELING" ]; then
 fi
 
 # 执行导出
-echo ">>> 开始导出 ONNX..." | tee -a "$LOG_FILE"
+export ASCEND_RT_VISIBLE_DEVICES="$NPU_ID"
+echo ">>> 开始导出 ONNX (NPU: $NPU_ID)..." | tee -a "$LOG_FILE"
 python3 export/export_onnx.py \
     --device_str "$DEVICE_STR" \
     --dtype "$DTYPE" \
@@ -103,6 +112,7 @@ python3 export/export_onnx.py \
     --onnx_model_path "$ONNX_MODEL_PATH" \
     --kv_cache_length "$KV_CACHE_LENGTH" \
     --simplify "$SIMPLIFY" \
+    --quantize "$QUANTIZE_MODE" \
     2>&1 | tee -a "$LOG_FILE"
 
 # 恢复原文件

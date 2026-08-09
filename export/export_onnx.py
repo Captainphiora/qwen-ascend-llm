@@ -18,6 +18,35 @@ import io
 import argparse
 from collections import Counter
 
+# Monkey-patch: fix safetensors files without metadata (e.g. from msmodelslim quantization)
+import safetensors
+_original_safe_open = safetensors.safe_open
+
+class _SafeOpenWrapper:
+    def __init__(self, *args, **kwargs):
+        self._f = _original_safe_open(*args, **kwargs)
+
+    def metadata(self):
+        meta = self._f.metadata()
+        if meta is None:
+            return {"format": "pt"}
+        return meta
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+    def __enter__(self):
+        self._f.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._f.__exit__(*args)
+
+safetensors.safe_open = _SafeOpenWrapper
+import transformers.modeling_utils as _tmu
+if hasattr(_tmu, 'safe_open'):
+    _tmu.safe_open = _SafeOpenWrapper
+
 
 class TeeLogger:
     """Duplicate stdout to both console and a log file."""
@@ -90,9 +119,9 @@ def parser_arguments():
     )
     parser.add_argument(
         "--quantize",
-        help="quantize mode: none, W8X8, W8A16",
+        help="quantize mode: none, W8X8, W8A16, W8A8",
         type=str,
-        choices=["none", "W8X8", "W8A16"],
+        choices=["none", "W8X8", "W8A16", "W8A8"],
         default="none",
     )
     return parser.parse_args()
@@ -168,11 +197,30 @@ def export_onnx(
         raise Exception("unsupport dtype")
 
     device = torch.device(device_str)
-    model = Qwen2ForCausalLM.from_pretrained(
-        hf_model_dir,
-        torch_dtype=torch_dtype,
-        # trust_remote_code=True
-    ).to(device)
+
+    if quantize_mode == "W8A8":
+        from quantize.w8a8_linear import load_w8a8_state_dict
+        safetensors_path = os.path.join(hf_model_dir, "model.safetensors")
+        if not os.path.exists(safetensors_path):
+            candidates = [f for f in os.listdir(hf_model_dir) if f.endswith(".safetensors")]
+            if candidates:
+                safetensors_path = os.path.join(hf_model_dir, candidates[0])
+            else:
+                raise FileNotFoundError(f"No safetensors file found in {hf_model_dir}")
+        print(f"[INFO] Loading W8A8 pre-quantized model from: {safetensors_path}")
+        config = Qwen2Config.from_pretrained(hf_model_dir)
+        model = Qwen2ForCausalLM(config).to(torch_dtype)
+        model = load_w8a8_state_dict(
+            safetensors_path, model, dtype=torch_dtype, device=device,
+            skip_layers=["lm_head"]
+        )
+        model = model.to(device)
+        print(f"[INFO] W8A8 model loaded successfully, {sum(1 for m in model.modules() if hasattr(m, 'weight_int8'))} quantized layers")
+    else:
+        model = Qwen2ForCausalLM.from_pretrained(
+            hf_model_dir,
+            torch_dtype=torch_dtype,
+        ).to(device)
     quantize_cfg = {
         "q_proj": {
             "type": "W8X8",
@@ -203,7 +251,7 @@ def export_onnx(
             "act_scale": False
         }
     }
-    if quantize_mode == "none":
+    if quantize_mode in ("none", "W8A8"):
         quantize_cfg = {}
     elif quantize_mode == "W8A16":
         for key in quantize_cfg:
@@ -303,6 +351,9 @@ if __name__ == "__main__":
             "AutoModelForSeq2SeqLM": "modeling_qwen2.Qwen2ForCausalLM",
             "AutoModelForSequenceClassification": "modeling_qwen2.Qwen2ForSequenceClassification"
         }
+        # Remove msmodelslim's custom quantization_config to avoid transformers
+        # misinterpreting it as bitsandbytes config during from_pretrained
+        model_config.pop("quantization_config", None)
         with open(config_json, "wt", encoding="utf-8") as f:
             json.dump(model_config, f, indent=4)
         test_model_config = Qwen2Config.from_pretrained(args.hf_model_dir)

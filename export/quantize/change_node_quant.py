@@ -1,21 +1,32 @@
 """
-ONNX 图改写：将量化 W8X8 模式转换为 AscendQuant + QuantBatchMatmulV3
-用于方案C的量化模型编译
+ONNX 图改写：将量化 W8A8 模式转换为 AscendQuant + QuantBatchMatmulV3
 
-输入图模式 (per quantized MatMul):
+适用于 msmodelslim 量化模型 (quant_qwen.py --w_bit 8 --a_bit 8) 经
+W8A8PreQuantizedLinear 导出的 ONNX。
+
+输入图模式 (per quantized MatMul, from W8A8PreQuantizedLinear export):
   activation(FP16) ─────────────────────────────────── MatMul → output
   weight_int8 → Cast(FP16) → Mul(w_scale) → Transpose ─┘
 
 替换为:
-  activation(FP16) → AscendQuant(scale=act_scale) ─── QuantBatchMatmulV3 → output(FP16)
-  weight_int8 (已转置存储) ─────────────────────────────┘
-  w_scale (per-channel, float32) ───────────────────────┘
+  activation(FP16) → AscendQuant(scale=input_scale) ─── QuantBatchMatmulV3 → output(FP16)
+  weight_int8 (已转置存储) ──────────────────────────────┘
+  w_scale (per-channel, float32) ────────────────────────┘
 
-注意: AscendQuant 使用固定 scale (无校准数据), 精度会有损失
+支持两种 scale 来源:
+  1. --quant_model_path: 从 msmodelslim 量化的 safetensors 中读取每层校准的 input_scale
+  2. --act_scale: 使用全局固定 scale (无校准数据, 精度较差, 仅用于兜底)
 
 用法:
+  # 使用校准的 per-layer input_scale (推荐)
   python export/quantize/change_node_quant.py \
-    --input_model_path output/onnx_changed_W8X8/model.onnx \
+    --input_model_path output/onnx_W8A8/model.onnx \
+    --output_model_path output/onnx_quant_final/model.onnx \
+    --quant_model_path /path/to/quantized/model.safetensors
+
+  # 使用固定全局 scale (兜底)
+  python export/quantize/change_node_quant.py \
+    --input_model_path output/onnx_W8A8/model.onnx \
     --output_model_path output/onnx_quant_final/model.onnx \
     --act_scale 0.01
 """
@@ -32,11 +43,27 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--input_model_path', type=str, required=True)
 parser.add_argument('--output_model_path', type=str, required=True)
 parser.add_argument('--act_scale', type=float, default=0.01,
-                    help="Static activation scale for AscendQuant (1/dynamic_range)")
+                    help="Fallback global activation scale for AscendQuant")
+parser.add_argument('--quant_model_path', type=str, default=None,
+                    help="Path to msmodelslim quantized safetensors for per-layer input_scale")
 args = parser.parse_args()
 
 output_model_dir = os.path.dirname(os.path.abspath(args.output_model_path))
 os.makedirs(output_model_dir, exist_ok=True)
+
+per_layer_scales = {}
+if args.quant_model_path and os.path.exists(args.quant_model_path):
+    from safetensors import safe_open
+    print(f"[INFO] Loading per-layer input_scale from: {args.quant_model_path}")
+    with safe_open(args.quant_model_path, framework="numpy") as f:
+        for key in f.keys():
+            if key.endswith(".input_scale"):
+                layer_prefix = key[: -len(".input_scale")]
+                scale_val = f.get_tensor(key).astype(np.float32).item()
+                per_layer_scales[layer_prefix] = scale_val
+    print(f"[INFO] Loaded {len(per_layer_scales)} per-layer input_scale values")
+else:
+    print(f"[INFO] Using global act_scale={args.act_scale} (no quant_model_path provided)")
 
 print(f"[INFO] Loading model: {args.input_model_path}")
 model = onnx.load(args.input_model_path, load_external_data=True)
@@ -97,6 +124,19 @@ for node in model.graph.node:
 
 print(f"[INFO] Found {len(quant_patterns)} quantized MatMul patterns to replace")
 
+
+def get_layer_input_scale(weight_int8_name: str) -> float:
+    """Derive per-layer input_scale from weight initializer name."""
+    layer_prefix = weight_int8_name.replace(".weight_int8", "")
+    if layer_prefix in per_layer_scales:
+        return per_layer_scales[layer_prefix]
+    if ".weight" in weight_int8_name:
+        alt_prefix = weight_int8_name.replace(".weight", "")
+        if alt_prefix in per_layer_scales:
+            return per_layer_scales[alt_prefix]
+    return args.act_scale
+
+
 nodes_to_remove = set()
 nodes_to_add = []
 new_initializers = []
@@ -113,13 +153,15 @@ for idx, pattern in enumerate(quant_patterns):
     scale_name = pattern["scale_name"]
     matmul_output = pattern["matmul_output"]
 
+    layer_scale = get_layer_input_scale(weight_name)
+
     quant_output = f"{prefix}_act_int8"
     ascend_quant_node = helper.make_node(
         "AscendQuant",
         inputs=[act_input],
         outputs=[quant_output],
         name=f"{prefix}_AscendQuant",
-        scale=float(args.act_scale),
+        scale=float(layer_scale),
         offset=0.0,
         dst_type=2,
     )
@@ -160,6 +202,10 @@ for init in new_initializers:
 print(f"[INFO] Replaced {len(quant_patterns)} patterns")
 print(f"[INFO] Added {len(nodes_to_add)} new nodes")
 print(f"[INFO] Total nodes: {len(model.graph.node)}")
+
+if per_layer_scales:
+    scales_used = [get_layer_input_scale(p["weight_int8_name"]) for p in quant_patterns]
+    print(f"[INFO] input_scale range: [{min(scales_used):.6f}, {max(scales_used):.6f}]")
 
 print(f"[INFO] Saving model: {args.output_model_path}")
 data_file = os.path.basename(args.output_model_path) + ".data"
