@@ -49,6 +49,8 @@ def main():
                         default="/usr/local/Ascend/atb-models/examples/convert/model_slim/boolq.jsonl")
     parser.add_argument("--num_samples", type=int, default=8)
     parser.add_argument("--kv_cache_length", type=int, default=4096)
+    parser.add_argument("--cpu_threads", type=int, default=64,
+                        help="Number of CPU threads for onnxruntime inference")
     parser.add_argument("--skip_layers", type=str, default="/lm_head/MatMul",
                         help="Comma-separated layer names to skip quantization")
     args = parser.parse_args()
@@ -109,10 +111,13 @@ def main():
 
     sess_options = ort.SessionOptions()
     sess_options.register_custom_ops_library(custom_op_lib)
+    sess_options.intra_op_num_threads = args.cpu_threads
+    sess_options.inter_op_num_threads = args.cpu_threads
+    sess_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
     sess = ort.InferenceSession(
         modified_model, sess_options, providers=["CPUExecutionProvider"]
     )
-    print("  Session created (CPU only, AMCT calibration ops are CPU-only)")
+    print(f"  Session created (CPU, {args.cpu_threads} threads, parallel mode)")
 
     tokenizer = AutoTokenizer.from_pretrained(args.hf_model_dir, trust_remote_code=True)
 

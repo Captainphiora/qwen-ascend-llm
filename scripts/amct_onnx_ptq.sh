@@ -18,6 +18,7 @@ cd "$SCRIPT_DIR"
 NPU_ID="3"
 NUM_SAMPLES=8
 KV_CACHE_LENGTH=4096
+CPU_THREADS=64
 MODEL_PATH="output/onnx_changed_310b/DeepSeek-R1-Distill-Qwen-1.5B_4096.onnx"
 HF_MODEL_DIR="/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
 CALIB_FILE="/usr/local/Ascend/atb-models/examples/convert/model_slim/boolq.jsonl"
@@ -30,6 +31,7 @@ for arg in "$@"; do
         --npu_id=*) NPU_ID="${arg#*=}" ;;
         --num_samples=*) NUM_SAMPLES="${arg#*=}" ;;
         --kv_cache_length=*) KV_CACHE_LENGTH="${arg#*=}" ;;
+        --cpu_threads=*) CPU_THREADS="${arg#*=}" ;;
         --model_path=*) MODEL_PATH="${arg#*=}" ;;
         --hf_model_dir=*) HF_MODEL_DIR="${arg#*=}" ;;
     esac
@@ -58,6 +60,7 @@ python3 scripts/amct_onnx_calibrate.py \
     --calib_file "$CALIB_FILE" \
     --num_samples "$NUM_SAMPLES" \
     --kv_cache_length "$KV_CACHE_LENGTH" \
+    --cpu_threads "$CPU_THREADS" \
     2>&1 | tee -a "$LOG_FILE"
 
 # Phase 2: ATC 编译 OM
