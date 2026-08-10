@@ -7,7 +7,8 @@ KV_CACHE_LENGTH=4096
 MAX_PREFILL_LENGTH=1
 # 
 HF_MODEL_DIR="../models/${MODEL_NAME}"
-OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
+# OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
+OM_MODEL_PATH="output/om_ptq_910/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_ptq.om"
 echo "OM_MODEL_PATH:$OM_MODEL_PATH"
 
 SAMPLING_METHOD="greedy"
@@ -19,7 +20,7 @@ TEMPERATURE=0
 # system_prompt
 CPU_THREAD=8
 DEVICE_STR="npu"
-DEVICE_ID=12
+DEVICE_ID=15
 # SOC_VERSION=Ascend310B1
 DTYPE="float16"
 
