@@ -60,6 +60,13 @@ parser.add_argument(
     type=str,
     default="",
 )
+parser.add_argument(
+    "--deq_scale_type",
+    help="deq_scale data type: uint64 (910, outputs FP32) or float16 (310B, outputs FP16)",
+    type=str,
+    choices=["uint64", "float16"],
+    default="uint64",
+)
 
 args = parser.parse_args()
 
@@ -93,12 +100,24 @@ try:
                 break
         if sf_path:
             with safe_open(sf_path, framework="np") as sf:
-                for key in sf.keys():
-                    if key.endswith(".deq_scale"):
-                        layer = key.rsplit(".deq_scale", 1)[0]
-                        # Store as UINT64 (hardware-native format)
-                        deq_scales[layer] = sf.get_tensor(key).astype(np.uint64)
-            print(f"Loaded UINT64 deq_scale for {len(deq_scales)} layers")
+                if args.deq_scale_type == "uint64":
+                    # UINT64 format: hardware-native encoding (910, AscendDequant outputs FP32)
+                    for key in sf.keys():
+                        if key.endswith(".deq_scale"):
+                            layer = key.rsplit(".deq_scale", 1)[0]
+                            deq_scales[layer] = sf.get_tensor(key).astype(np.uint64)
+                    print(f"Loaded UINT64 deq_scale for {len(deq_scales)} layers")
+                else:
+                    # FP16 format: compute input_scale * weight_scale (310B, AscendDequant outputs FP16)
+                    for key in sf.keys():
+                        if key.endswith(".input_scale"):
+                            layer = key.rsplit(".input_scale", 1)[0]
+                            i_scale = sf.get_tensor(key).astype(np.float32)
+                            w_scale_key = f"{layer}.weight_scale"
+                            if w_scale_key in sf.keys():
+                                w_scale = sf.get_tensor(w_scale_key).astype(np.float32).squeeze()
+                                deq_scales[layer] = (i_scale * w_scale).astype(np.float16)
+                    print(f"Computed FP16 deq_scale for {len(deq_scales)} layers")
 
     # Collect INT8 initializer names
     int8_initializers = set()
@@ -209,7 +228,6 @@ try:
                     matmul_int32_out = node.output[0] + "_int32"
                     deq_scale_name = f"{layer_name}.deq_scale_const"
 
-                    # Use deq_scale as UINT64 (hardware-native Ascend format)
                     deq_init = numpy_helper.from_array(
                         deq_data, name=deq_scale_name
                     )
@@ -222,23 +240,31 @@ try:
                     )
                     new_nodes.append(matmul_node)
 
-                    # AscendDequant: INT32 × deq_scale → FP32 (then cast to FP16)
-                    dequant_fp32_out = node.output[0] + "_fp32"
-                    dequant_node = helper.make_node(
-                        "AscendDequant",
-                        inputs=[matmul_int32_out, deq_scale_name],
-                        outputs=[dequant_fp32_out],
-                    )
-                    new_nodes.append(dequant_node)
+                    if args.deq_scale_type == "float16":
+                        # FP16 deq_scale: AscendDequant outputs FP16 directly (310B)
+                        dequant_node = helper.make_node(
+                            "AscendDequant",
+                            inputs=[matmul_int32_out, deq_scale_name],
+                            outputs=[node.output[0]],
+                        )
+                        new_nodes.append(dequant_node)
+                    else:
+                        # UINT64 deq_scale: AscendDequant outputs FP32, needs Cast to FP16 (910)
+                        dequant_fp32_out = node.output[0] + "_fp32"
+                        dequant_node = helper.make_node(
+                            "AscendDequant",
+                            inputs=[matmul_int32_out, deq_scale_name],
+                            outputs=[dequant_fp32_out],
+                        )
+                        new_nodes.append(dequant_node)
+                        cast_fp16_node = helper.make_node(
+                            "Cast",
+                            inputs=[dequant_fp32_out],
+                            outputs=[node.output[0]],
+                            to=TensorProto.FLOAT16,
+                        )
+                        new_nodes.append(cast_fp16_node)
 
-                    # Cast FP32 → FP16 for downstream ops
-                    cast_fp16_node = helper.make_node(
-                        "Cast",
-                        inputs=[dequant_fp32_out],
-                        outputs=[node.output[0]],
-                        to=TensorProto.FLOAT16,
-                    )
-                    new_nodes.append(cast_fp16_node)
                     rewired_matmuls += 1
                     inserted_dequants += 1
                     continue
