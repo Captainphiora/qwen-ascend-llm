@@ -241,13 +241,21 @@ try:
                     new_nodes.append(matmul_node)
 
                     if args.deq_scale_type == "float16":
-                        # FP16 deq_scale: AscendDequant outputs FP16 directly (310B)
+                        # FP16 deq_scale (310B): AscendDequant still outputs FP32, Cast to FP16
+                        dequant_fp32_out = node.output[0] + "_fp32"
                         dequant_node = helper.make_node(
                             "AscendDequant",
                             inputs=[matmul_int32_out, deq_scale_name],
-                            outputs=[node.output[0]],
+                            outputs=[dequant_fp32_out],
                         )
                         new_nodes.append(dequant_node)
+                        cast_fp16_node = helper.make_node(
+                            "Cast",
+                            inputs=[dequant_fp32_out],
+                            outputs=[node.output[0]],
+                            to=TensorProto.FLOAT16,
+                        )
+                        new_nodes.append(cast_fp16_node)
                     else:
                         # UINT64 deq_scale: AscendDequant outputs FP32, needs Cast to FP16 (910)
                         dequant_fp32_out = node.output[0] + "_fp32"
