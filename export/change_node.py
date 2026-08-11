@@ -1,9 +1,10 @@
 import os
 import sys
 from datetime import datetime
+import numpy as np
 import onnx
 import onnx.helper as helper
-from onnx import TensorProto
+from onnx import TensorProto, numpy_helper
 from tqdm import tqdm
 import argparse
 
@@ -53,6 +54,12 @@ parser.add_argument(
     type=str,
     default=os.path.join(new_onnx_dir, model_name)
 )
+parser.add_argument(
+    "--quant_model_dir",
+    help="msmodelslim quantized model dir (for deq_scale). If not set, skip INT8 transform.",
+    type=str,
+    default="",
+)
 
 args = parser.parse_args()
 
@@ -74,35 +81,89 @@ try:
             os.remove(file_path)
 
     model = onnx.load(args.input_model_path)
-    new_nodes = []
 
-    # Collect INT8 initializer names (weight constants from quantization)
+    # Load deq_scale from msmodelslim if provided
+    deq_scales = {}
+    if args.quant_model_dir:
+        from safetensors import safe_open
+        sf_path = None
+        for f in os.listdir(args.quant_model_dir):
+            if f.endswith(".safetensors"):
+                sf_path = os.path.join(args.quant_model_dir, f)
+                break
+        if sf_path:
+            with safe_open(sf_path, framework="np") as sf:
+                for key in sf.keys():
+                    if key.endswith(".deq_scale"):
+                        layer = key.rsplit(".deq_scale", 1)[0]
+                        # Store as UINT64 (hardware-native format)
+                        deq_scales[layer] = sf.get_tensor(key).astype(np.uint64)
+            print(f"Loaded UINT64 deq_scale for {len(deq_scales)} layers")
+
+    # Collect INT8 initializer names
     int8_initializers = set()
     for init in model.graph.initializer:
         if init.data_type == TensorProto.INT8:
             int8_initializers.add(init.name)
 
-    # Find Cast(INT8→FP16) nodes that take ONLY INT8 initializer as input (weight side only)
-    weight_cast_outputs_to_bypass = {}  # cast_output → cast_input (the INT8 initializer)
-    cast_to_int8_outputs = set()  # outputs of Cast(to=INT8) nodes
+    # Map: initializer_name → layer_name (e.g. "model.layers.0.mlp.gate_proj.weight_int8" → "model.layers.0.mlp.gate_proj")
+    init_to_layer = {}
+    for name in int8_initializers:
+        if name.endswith(".weight_int8"):
+            layer = name.rsplit(".weight_int8", 1)[0]
+            init_to_layer[name] = layer
+
+    # Find Cast(INT8→FP16) on weight side and activation side
+    weight_cast_bypass = {}  # cast_output → INT8 initializer name
+    act_cast_bypass = {}     # cast_output → AscendQuant/Cast(INT8) output name
+
+    cast_to_int8_outputs = set()
+    for node in model.graph.node:
+        if node.op_type == "Cast":
+            to_attr = next((a for a in node.attribute if a.name == "to"), None)
+            if to_attr and to_attr.i == TensorProto.INT8:
+                cast_to_int8_outputs.add(node.output[0])
 
     for node in model.graph.node:
         if node.op_type == "Cast":
             to_attr = next((a for a in node.attribute if a.name == "to"), None)
-            if to_attr:
-                if to_attr.i == TensorProto.INT8:
-                    cast_to_int8_outputs.add(node.output[0])
-                elif to_attr.i == TensorProto.FLOAT16:
-                    # ONLY bypass weight initializer casts, NOT activation casts
-                    if node.input[0] in int8_initializers:
-                        weight_cast_outputs_to_bypass[node.output[0]] = node.input[0]
+            if to_attr and to_attr.i == TensorProto.FLOAT16:
+                if node.input[0] in int8_initializers:
+                    weight_cast_bypass[node.output[0]] = node.input[0]
+                elif node.input[0] in cast_to_int8_outputs:
+                    act_cast_bypass[node.output[0]] = node.input[0]
 
     print(f"INT8 initializers: {len(int8_initializers)}")
-    print(f"Cast(INT8→FP16) to bypass: {len(weight_cast_outputs_to_bypass)}")
+    print(f"Weight Cast(INT8→FP16) to bypass: {len(weight_cast_bypass)}")
+    print(f"Activation Cast(INT8→FP16) to bypass: {len(act_cast_bypass)}")
 
-    removed_casts = 0
+    # Track Transpose nodes that sit between Cast(INT8→FP16) and MatMul
+    # Pattern: weight_int8 → Cast(FP16) → Transpose → MatMul
+    transpose_bypass = {}  # transpose_output → (transpose_input_before_cast, weight_init_name)
+    for node in model.graph.node:
+        if node.op_type == "Transpose":
+            if node.input[0] in weight_cast_bypass:
+                transpose_bypass[node.output[0]] = weight_cast_bypass[node.input[0]]
+
+    # Combined: MatMul input → INT8 source (through Cast and/or Transpose)
+    matmul_weight_bypass = {}  # matmul_input_name → INT8 initializer name
+    matmul_weight_bypass.update({k: v for k, v in weight_cast_bypass.items()})
+    # For Transpose case, we need to keep the Transpose but change its input
+    transpose_rewire = {}  # transpose_output → should rewire transpose input to INT8
+    for node in model.graph.node:
+        if node.op_type == "Transpose" and node.input[0] in weight_cast_bypass:
+            transpose_rewire[node.output[0]] = (node, weight_cast_bypass[node.input[0]])
+
+    print(f"Transpose nodes to rewire: {len(transpose_rewire)}")
+
+    new_nodes = []
+    new_initializers = list(model.graph.initializer)
+    rewired_matmuls = 0
+    inserted_dequants = 0
+
     for node in tqdm(model.graph.node, desc="replace node..."):
         new_node = node
+
         if node.op_type == "Trilu":
             new_node = helper.make_node(
                 "Trilu",
@@ -122,26 +183,80 @@ try:
                     scale=1.,
                 )
         elif node.op_type == "MatMul":
-            # Rewire MatMul inputs: bypass Cast(INT8→FP16), connect INT8 directly
-            new_inputs = []
-            rewired = False
-            for inp in node.input:
-                if inp in weight_cast_outputs_to_bypass:
-                    new_inputs.append(weight_cast_outputs_to_bypass[inp])
-                    rewired = True
-                else:
-                    new_inputs.append(inp)
-            if rewired:
+            # Check if this MatMul has INT8 inputs (via Cast bypass or Transpose bypass)
+            new_inputs = list(node.input)
+            weight_init_name = None
+            has_int8_weight = False
+            has_int8_act = False
+
+            for idx, inp in enumerate(node.input):
+                # Activation side: Cast(INT8→FP16) output directly feeds MatMul
+                if inp in act_cast_bypass:
+                    new_inputs[idx] = act_cast_bypass[inp]
+                    has_int8_act = True
+                # Weight side: Transpose output (Transpose takes Cast(INT8→FP16) output)
+                if inp in transpose_rewire:
+                    trans_node, init_name = transpose_rewire[inp]
+                    weight_init_name = init_name
+                    has_int8_weight = True
+                    # We'll handle Transpose rewiring separately
+
+            if has_int8_weight and has_int8_act and deq_scales:
+                layer_name = init_to_layer.get(weight_init_name, "")
+                deq_data = deq_scales.get(layer_name)
+
+                if deq_data is not None:
+                    matmul_int32_out = node.output[0] + "_int32"
+                    deq_scale_name = f"{layer_name}.deq_scale_const"
+
+                    # Use deq_scale as UINT64 (hardware-native Ascend format)
+                    deq_init = numpy_helper.from_array(
+                        deq_data, name=deq_scale_name
+                    )
+                    new_initializers.append(deq_init)
+
+                    # MatMul with INT8 inputs
+                    matmul_node = helper.make_node(
+                        "MatMul", name=node.name,
+                        inputs=new_inputs, outputs=[matmul_int32_out],
+                    )
+                    new_nodes.append(matmul_node)
+
+                    # AscendDequant: INT32 × deq_scale → FP32 (then cast to FP16)
+                    dequant_fp32_out = node.output[0] + "_fp32"
+                    dequant_node = helper.make_node(
+                        "AscendDequant",
+                        inputs=[matmul_int32_out, deq_scale_name],
+                        outputs=[dequant_fp32_out],
+                    )
+                    new_nodes.append(dequant_node)
+
+                    # Cast FP32 → FP16 for downstream ops
+                    cast_fp16_node = helper.make_node(
+                        "Cast",
+                        inputs=[dequant_fp32_out],
+                        outputs=[node.output[0]],
+                        to=TensorProto.FLOAT16,
+                    )
+                    new_nodes.append(cast_fp16_node)
+                    rewired_matmuls += 1
+                    inserted_dequants += 1
+                    continue
+
+        elif node.op_type == "Transpose":
+            # Rewire Transpose input from Cast(FP16) output to INT8 initializer directly
+            if node.output[0] in transpose_rewire:
+                _, init_name = transpose_rewire[node.output[0]]
                 new_node = helper.make_node(
-                    "MatMul",
-                    name=node.name,
-                    inputs=new_inputs,
-                    outputs=node.output,
+                    "Transpose", name=node.name,
+                    inputs=[init_name], outputs=node.output,
+                    perm=[1, 0],
                 )
-                removed_casts += 1
+
         new_nodes.append(new_node)
 
-    print(f"Rewired {removed_casts} MatMul nodes to use INT8 inputs directly")
+    print(f"Rewired {rewired_matmuls} MatMul nodes")
+    print(f"Inserted {inserted_dequants} AscendDequant nodes")
     print("make new graph")
     new_graph = helper.make_graph(
         new_nodes,
@@ -149,7 +264,7 @@ try:
         inputs=model.graph.input,
         outputs=model.graph.output,
         value_info=model.graph.value_info,
-        initializer=model.graph.initializer
+        initializer=new_initializers
     )
     print("make new model")
     new_model = helper.make_model(new_graph, producer_name=model.producer_name,opset_imports=model.opset_import,ir_version = model.ir_version)

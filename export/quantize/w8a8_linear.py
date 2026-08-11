@@ -78,10 +78,9 @@ class W8A8PreQuantizedLinear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Quantize activation: x_int8 = round(x / input_scale + input_offset)
         x_q = torch.clamp(torch.round(x / self.input_scale + self.input_offset), -128, 127).to(torch.int8)
-        # INT8 MatMul
+        # INT8 MatMul (ATC fuses AscendQuant + MatMul + AscendDequant into QuantBatchMatmulV3)
         out = F.linear(x_q.to(x.dtype), self.weight_int8.to(x.dtype), None)
-        # Dequantize
-        out = out * self.deq_factor
+        # Bias only (dequantization is done by AscendDequant in .om, not here)
         if self.effective_bias is not None:
             out = out + self.effective_bias
         return out
