@@ -27,9 +27,11 @@ import numpy as np
 class W8A8PreQuantizedLinear(nn.Module):
     """Linear layer initialized from msmodelslim W8A8 quantized weights.
 
-    Stores int8 weight and per-channel weight_scale. Forward dequantizes
-    weight inline so that torch.onnx.export produces:
-        Cast(int8→fp16) → Mul(scale) → MatMul
+    Forward produces ONNX pattern:
+        input → Mul(input_scale) → Cast(to=INT8) → MatMul(weight_int8) → Cast(to=FP16) → Mul(deq_scale)
+    
+    change_node.py converts Cast(to=INT8) → AscendQuant, enabling ATC to fuse
+    into real INT8 Cube operators.
     """
 
     def __init__(
@@ -66,10 +68,23 @@ class W8A8PreQuantizedLinear(nn.Module):
         self.register_buffer(
             "quant_bias", torch.zeros(out_features, dtype=torch.int32)
         )
+        self.register_buffer(
+            "deq_factor", torch.ones(out_features, dtype=dtype)
+        )
+        self.register_buffer(
+            "effective_bias", torch.zeros(out_features, dtype=dtype) if bias else None
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        weight_dequant = self.weight_int8.to(x.dtype) * self.weight_scale
-        return F.linear(x, weight_dequant, self.bias)
+        # Quantize activation: x_int8 = round(x / input_scale + input_offset)
+        x_q = torch.clamp(torch.round(x / self.input_scale + self.input_offset), -128, 127).to(torch.int8)
+        # INT8 MatMul
+        out = F.linear(x_q.to(x.dtype), self.weight_int8.to(x.dtype), None)
+        # Dequantize
+        out = out * self.deq_factor
+        if self.effective_bias is not None:
+            out = out + self.effective_bias
+        return out
 
 
 def load_w8a8_state_dict(
@@ -151,6 +166,24 @@ def load_w8a8_state_dict(
             quant_bias_key = f"{layer_name}.quant_bias"
             if quant_bias_key in all_keys:
                 quant_linear.quant_bias.copy_(f.get_tensor(quant_bias_key))
+
+            # Pre-compute deq_factor and effective_bias for INT8 forward
+            # Math: y = (x_int8 - offset) * input_scale @ (W_int8 * weight_scale).T + bias
+            #      = (x_int8 @ W_int8.T) * input_scale * weight_scale
+            #        - offset * W_int8.sum(1) * input_scale * weight_scale + bias
+            w_scale = quant_linear.weight_scale.squeeze(-1).float()
+            i_scale = quant_linear.input_scale.float()
+            i_offset = quant_linear.input_offset.float()
+            deq_factor = i_scale * w_scale
+            quant_linear.deq_factor.copy_(deq_factor.to(dtype))
+
+            w_int8_sum = quant_linear.weight_int8.float().sum(dim=1)
+            bias_correction = i_offset * w_int8_sum * i_scale * w_scale
+            if has_bias:
+                eff_bias = quant_linear.bias.float() - bias_correction
+                quant_linear.effective_bias.copy_(eff_bias.to(dtype))
+            else:
+                quant_linear.effective_bias = (-bias_correction).to(dtype)
 
             parts = layer_name.split(".")
             parent = model

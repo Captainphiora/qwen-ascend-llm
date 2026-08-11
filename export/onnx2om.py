@@ -111,6 +111,12 @@ parser.add_argument(
     choices=["true", "false"],
     default="false",
 )
+parser.add_argument(
+    "--precision_mode",
+    help="ATC precision mode. Use 'origin' for AMCT quantized models to preserve INT8 operators.",
+    type=str,
+    default="mixed_float16",
+)
 
 
 args = parser.parse_args()
@@ -230,8 +236,13 @@ try:
         '--model="{}"'.format(args.onnx_model_path),
         '--output="{}"'.format(args.om_model_path),
         "--soc_version={}".format(soc_version),
-        "--precision_mode_v2=mixed_float16",
-        "--modify_mixlist={}".format(os.path.join(project_dir, "ops_info.json")),
+        "--precision_mode_v2={}".format(args.precision_mode),
+    ]
+    if args.precision_mode != "origin":
+        command_lines.append(
+            "--modify_mixlist={}".format(os.path.join(project_dir, "ops_info.json"))
+        )
+    command_lines += [
         "--input_format=ND",
         '--input_shape="input_ids:{};attention_mask:{};position_ids:{};past_key_values:{}"'.format(
             ",".join(input_ids_shape),
