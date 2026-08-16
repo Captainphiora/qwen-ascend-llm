@@ -26,6 +26,7 @@ class InferenceConfig:
         dtype: str = "float16",
         torch_dtype: str = "float16",
         device_str: str = "cpu",
+        sampling_device: str = "cpu",
     ):
         self.tokenizer_dir = hf_model_dir
         self.session_type = session_type
@@ -58,6 +59,7 @@ class InferenceConfig:
         else:
             self.torch_type = "auto"
         self.device_str = device_str
+        self.sampling_device = sampling_device
         self.model_config = Qwen2Config.from_pretrained(hf_model_dir)
         self.num_hidden_layers = self.model_config.num_hidden_layers # n_layer
         self.num_key_value_heads = self.model_config.num_key_value_heads # head_num
