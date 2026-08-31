@@ -1,120 +1,185 @@
+"""
+Profiling 深度分析脚本：算子耗时分解 + MatMul 细分 + 数据搬运分析
+
+用法:
+    python benchmarks/parse_profiling.py --prof_dir <PROF_*目录> [--label v4]
+
+输出:
+    1. 算子类型耗时排名
+    2. AI Core vs Vector Core 占比
+    3. BatchMatMulV2 细分: q/k/v/o_proj, gate/up/down_proj, attn_score
+    4. 数据搬运分析: Transpose, GatherV2, ConcatD (含 shape 信息)
+    5. AI Core 利用率 + FP16 MAC ratio
+    6. 每 token 耗时分解汇总
+"""
 import csv
+import os
+import sys
+import argparse
 from collections import defaultdict
 
-OUTDIR = "profiling/decode_profile/PROF_000001_20260831191419866_04143416HCCKEABK/mindstudio_profiler_output"
-with open(f"{OUTDIR}/op_summary_20260831191821.csv") as f:
-    rows = list(csv.DictReader(f))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-total_time = sum(float(r.get('Task Duration(us)', 0)) for r in rows)
-N = 35
 
-print(f"总 kernel 时间: {total_time/1e6:.3f}s ({len(rows)} kernels, {N} iterations)")
-print(f"每 iteration: {total_time/N/1000:.2f}ms")
-print()
+def find_csv(prof_dir, pattern):
+    for root, dirs, files in os.walk(prof_dir):
+        for f in sorted(files):
+            if pattern in f and f.endswith(".csv"):
+                return os.path.join(root, f)
+    return None
 
-by_type = defaultdict(lambda: {'count': 0, 'total_us': 0, 'max_us': 0})
-for r in rows:
-    op = r['OP Type']
-    dur = float(r.get('Task Duration(us)', 0))
-    by_type[op]['count'] += 1
-    by_type[op]['total_us'] += dur
-    by_type[op]['max_us'] = max(by_type[op]['max_us'], dur)
 
-header = f"{'OP Type':<30} {'Count':>6} {'Total(ms)':>10} {'Ratio':>7} {'Avg(ms)':>8} {'Max(ms)':>8} {'Per-Iter':>10}"
-print(header)
-print("-" * 90)
-for op, d in sorted(by_type.items(), key=lambda x: -x[1]['total_us']):
-    ratio = d['total_us'] / total_time * 100
-    avg = d['total_us'] / d['count'] / 1000
-    per_iter = d['total_us'] / N / 1000
-    print(f"{op:<30} {d['count']:>6} {d['total_us']/1000:>10.2f} {ratio:>6.1f}% {avg:>8.3f} {d['max_us']/1000:>8.3f} {per_iter:>10.3f}")
+def main():
+    parser = argparse.ArgumentParser(description="Profiling 深度分析")
+    parser.add_argument("--prof_dir", type=str, required=True, help="PROF_* 目录路径")
+    parser.add_argument("--label", type=str, default="unknown", help="版本标签")
+    parser.add_argument("--iterations", type=int, default=0, help="总迭代次数 (0=自动)")
+    args = parser.parse_args()
 
-print()
+    summary_csv = find_csv(args.prof_dir, "op_summary")
+    if not summary_csv:
+        print(f"[ERROR] 未找到 op_summary CSV in {args.prof_dir}")
+        sys.exit(1)
 
-# BatchMatMulV2 breakdown
-bmm_rows = [r for r in rows if r['OP Type'] == 'BatchMatMulV2']
-print(f"=== BatchMatMulV2 ({len(bmm_rows)} kernels, {sum(float(r['Task Duration(us)']) for r in bmm_rows)/1000:.2f}ms total) ===")
+    with open(summary_csv) as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        print("[ERROR] op_summary CSV 为空")
+        sys.exit(1)
 
-categories = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
-cat_stats = defaultdict(lambda: {'count': 0, 'total_us': 0})
+    total_time_us = sum(float(r.get("Task Duration(us)", 0)) for r in rows)
 
-for r in bmm_rows:
-    name = r.get('Op Name', '')
-    dur = float(r.get('Task Duration(us)', 0))
-    found = False
-    for cat in categories:
-        if cat in name:
-            cat_stats[cat]['count'] += 1
-            cat_stats[cat]['total_us'] += dur
-            found = True
-            break
-    if not found:
-        cat_stats['attn_score']['count'] += 1
-        cat_stats['attn_score']['total_us'] += dur
-
-print(f"  {'Category':<15} {'Count':>6} {'Total(ms)':>10} {'Per-Iter':>10} {'Ratio':>7}")
-print("  " + "-" * 55)
-bmm_total = sum(float(r['Task Duration(us)']) for r in bmm_rows)
-for cat in categories + ['attn_score']:
-    d = cat_stats[cat]
-    if d['count'] > 0:
-        per_iter = d['total_us'] / N / 1000
-        ratio = d['total_us'] / bmm_total * 100
-        print(f"  {cat:<15} {d['count']:>6} {d['total_us']/1000:>10.2f} {per_iter:>10.3f} {ratio:>6.1f}%")
-
-print()
-
-# Transpose
-transpose_rows = [r for r in rows if r['OP Type'] == 'Transpose']
-print(f"=== Transpose ({len(transpose_rows)} kernels) ===")
-for r in transpose_rows[:3]:
-    dur = float(r.get('Task Duration(us)', 0))
-    name = r.get('Op Name', '')[:80]
-    shapes = r.get('Input Shapes', '')[:60]
-    print(f"  {dur/1000:.3f}ms | {shapes} | {name[:60]}")
-total_tr = sum(float(r['Task Duration(us)']) for r in transpose_rows)
-print(f"  Total: {total_tr/1000:.2f}ms, Per-Iter: {total_tr/N/1000:.2f}ms")
-print()
-
-# GatherV2 analysis
-gather_rows = [r for r in rows if r['OP Type'] == 'GatherV2']
-print(f"=== GatherV2 ({len(gather_rows)} kernels) ===")
-gather_by_name = defaultdict(lambda: {'count': 0, 'total_us': 0})
-for r in gather_rows:
-    name = r.get('Op Name', '')
-    dur = float(r.get('Task Duration(us)', 0))
-    if 'embed_tokens' in name:
-        gather_by_name['embed_tokens']['count'] += 1
-        gather_by_name['embed_tokens']['total_us'] += dur
-    elif 'kv' in name.lower() or 'cache' in name.lower() or 'Concat' in name:
-        gather_by_name['kv_related']['count'] += 1
-        gather_by_name['kv_related']['total_us'] += dur
+    if args.iterations > 0:
+        N = args.iterations
     else:
-        gather_by_name['other']['count'] += 1
-        gather_by_name['other']['total_us'] += dur
+        N = max(sum(1 for r in rows if "embed_tokens" in r.get("Op Name", "")), 1)
 
-for cat, d in gather_by_name.items():
-    print(f"  {cat}: count={d['count']}, total={d['total_us']/1000:.2f}ms, per-iter={d['total_us']/N/1000:.2f}ms")
+    print("=" * 80)
+    print(f" Profiling 深度分析: {args.label}")
+    print(f" 数据: {summary_csv}")
+    print(f" 总 kernel 时间: {total_time_us/1e6:.3f}s ({len(rows)} kernels, {N} iterations)")
+    print(f" 每 iteration: {total_time_us/N/1000:.2f}ms")
+    print("=" * 80)
 
-# Show a few GatherV2 op names for context
-print("  Sample names:")
-seen = set()
-for r in gather_rows:
-    name = r.get('Op Name', '')[:100]
-    short = name.split('/')[-1] if '/' in name else name
-    if short not in seen:
-        seen.add(short)
-        shapes = r.get('Input Shapes', '')[:60]
-        print(f"    {short[:40]:<40} {shapes}")
-    if len(seen) >= 8:
-        break
+    # 1. 算子类型耗时排名
+    by_type = defaultdict(lambda: {"count": 0, "total_us": 0, "max_us": 0, "core": ""})
+    for r in rows:
+        op = r.get("OP Type", "unknown")
+        dur = float(r.get("Task Duration(us)", 0))
+        core = r.get("Task Type", "")
+        by_type[op]["count"] += 1
+        by_type[op]["total_us"] += dur
+        by_type[op]["max_us"] = max(by_type[op]["max_us"], dur)
+        if not by_type[op]["core"]:
+            by_type[op]["core"] = core
 
-print()
+    print()
+    print(">>> 1. 算子类型耗时排名")
+    print(f"  {'算子':<28} {'Core':<18} {'次数':>6} {'总耗时(ms)':>10} {'占比':>7} {'均值(us)':>9} {'每token(ms)':>11}")
+    print("  " + "-" * 100)
+    for op, d in sorted(by_type.items(), key=lambda x: -x[1]["total_us"]):
+        ratio = d["total_us"] / total_time_us * 100
+        avg_us = d["total_us"] / d["count"]
+        per_iter = d["total_us"] / N / 1000
+        print(f"  {op:<28} {d['core']:<18} {d['count']:>6} {d['total_us']/1000:>10.2f} {ratio:>6.1f}% {avg_us:>9.1f} {per_iter:>11.3f}")
 
-# Per-iteration time breakdown summary
-print("=== Per-Iteration (每 token) 耗时分解 ===")
-print(f"  Total per token:   {total_time/N/1000:.2f}ms")
-for op, d in sorted(by_type.items(), key=lambda x: -x[1]['total_us'])[:8]:
-    per_iter = d['total_us'] / N / 1000
-    ratio = d['total_us'] / total_time * 100
-    print(f"  {op:<25} {per_iter:>8.2f}ms ({ratio:>5.1f}%)")
+    # 2. AI Core vs Vector Core
+    core_time = defaultdict(float)
+    for r in rows:
+        core = r.get("Task Type", "unknown")
+        dur = float(r.get("Task Duration(us)", 0))
+        core_time[core] += dur
+
+    print()
+    print(">>> 2. AI Core vs Vector Core")
+    for core, t in sorted(core_time.items(), key=lambda x: -x[1]):
+        print(f"  {core:<25} {t/1000:>10.2f}ms ({t/total_time_us*100:>5.1f}%)")
+
+    # 3. BatchMatMulV2 细分
+    bmm_rows = [r for r in rows if r.get("OP Type") == "BatchMatMulV2"]
+    if bmm_rows:
+        bmm_total = sum(float(r.get("Task Duration(us)", 0)) for r in bmm_rows)
+        categories = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        cat_stats = defaultdict(lambda: {"count": 0, "total_us": 0})
+        for r in bmm_rows:
+            name = r.get("Op Name", "")
+            dur = float(r.get("Task Duration(us)", 0))
+            matched = False
+            for cat in categories:
+                if cat in name:
+                    cat_stats[cat]["count"] += 1
+                    cat_stats[cat]["total_us"] += dur
+                    matched = True
+                    break
+            if not matched:
+                cat_stats["attn_score"]["count"] += 1
+                cat_stats["attn_score"]["total_us"] += dur
+
+        print()
+        print(f">>> 3. BatchMatMulV2 细分 ({len(bmm_rows)} kernels, {bmm_total/1000:.2f}ms)")
+        print(f"  {'子模块':<18} {'次数':>6} {'总耗时(ms)':>10} {'每token(ms)':>11} {'占BMM':>7} {'占总比':>7}")
+        print("  " + "-" * 68)
+        mlp_us, attn_us = 0, 0
+        for cat in categories + ["attn_score"]:
+            d = cat_stats[cat]
+            if d["count"] > 0:
+                per_iter = d["total_us"] / N / 1000
+                print(f"  {cat:<18} {d['count']:>6} {d['total_us']/1000:>10.2f} {per_iter:>11.3f} {d['total_us']/bmm_total*100:>6.1f}% {d['total_us']/total_time_us*100:>6.1f}%")
+                if cat in ("gate_proj", "up_proj", "down_proj"):
+                    mlp_us += d["total_us"]
+                else:
+                    attn_us += d["total_us"]
+        print("  " + "-" * 68)
+        print(f"  {'MLP 合计':<18} {'':>6} {mlp_us/1000:>10.2f} {mlp_us/N/1000:>11.3f} {mlp_us/bmm_total*100:>6.1f}% {mlp_us/total_time_us*100:>6.1f}%")
+        print(f"  {'Attention 合计':<18} {'':>6} {attn_us/1000:>10.2f} {attn_us/N/1000:>11.3f} {attn_us/bmm_total*100:>6.1f}% {attn_us/total_time_us*100:>6.1f}%")
+
+    # 4. 数据搬运分析
+    print()
+    print(">>> 4. 数据搬运分析")
+    transport_total_us = 0
+    for op_type in ["Transpose", "TransData", "GatherV2", "ConcatD"]:
+        op_rows = [r for r in rows if r.get("OP Type") == op_type]
+        if not op_rows:
+            continue
+        op_total = sum(float(r.get("Task Duration(us)", 0)) for r in op_rows)
+        transport_total_us += op_total
+        per_iter = op_total / N / 1000
+        print(f"  {op_type}: {len(op_rows)} 次, 总 {op_total/1000:.2f}ms ({op_total/total_time_us*100:.1f}%), 每token {per_iter:.2f}ms")
+
+        seen_shapes = defaultdict(lambda: {"count": 0, "total_us": 0})
+        for r in op_rows:
+            shape = r.get("Input Shapes", "")[:80]
+            dur = float(r.get("Task Duration(us)", 0))
+            seen_shapes[shape]["count"] += 1
+            seen_shapes[shape]["total_us"] += dur
+        for shape, d in sorted(seen_shapes.items(), key=lambda x: -x[1]["total_us"])[:3]:
+            print(f"    shape: {shape:<55} ×{d['count']:<4} {d['total_us']/1000:.2f}ms")
+    print(f"  数据搬运合计: {transport_total_us/1000:.2f}ms ({transport_total_us/total_time_us*100:.1f}%), 每token {transport_total_us/N/1000:.2f}ms")
+
+    # 5. AI Core 利用率
+    if bmm_rows and "aicore_time(us)" in bmm_rows[0]:
+        total_aic = sum(float(r.get("aicore_time(us)", 0)) for r in bmm_rows)
+        total_dur = sum(float(r.get("Task Duration(us)", 0)) for r in bmm_rows)
+        if total_dur > 0:
+            print()
+            print(">>> 5. BatchMatMulV2 硬件利用率")
+            print(f"  Task Duration:       {total_dur/1000:.2f}ms")
+            print(f"  AI Core Time:        {total_aic/1000:.2f}ms")
+            print(f"  AI Core 利用率:      {total_aic/total_dur*100:.1f}%")
+        mac_ratios = [float(r.get("aic_mac_fp16_ratio", 0)) for r in bmm_rows if float(r.get("aic_mac_fp16_ratio", 0)) > 0]
+        if mac_ratios:
+            print(f"  平均 FP16 MAC ratio: {sum(mac_ratios)/len(mac_ratios)*100:.1f}%")
+
+    # 6. 每 token 耗时分解
+    print()
+    print(f">>> 6. 每 token 耗时分解 ({total_time_us/N/1000:.2f}ms)")
+    print(f"  {'算子':<25} {'耗时(ms)':>10} {'占比':>7}")
+    print("  " + "-" * 45)
+    for op, d in sorted(by_type.items(), key=lambda x: -x[1]["total_us"])[:10]:
+        per_iter = d["total_us"] / N / 1000
+        print(f"  {op:<25} {per_iter:>10.2f} {d['total_us']/total_time_us*100:>6.1f}%")
+    print("=" * 80)
+
+
+if __name__ == "__main__":
+    main()
