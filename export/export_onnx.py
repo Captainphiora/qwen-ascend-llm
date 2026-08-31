@@ -18,6 +18,35 @@ import io
 import argparse
 from collections import Counter
 
+# Monkey-patch: fix safetensors files without metadata (e.g. from msmodelslim quantization)
+import safetensors
+_original_safe_open = safetensors.safe_open
+
+class _SafeOpenWrapper:
+    def __init__(self, *args, **kwargs):
+        self._f = _original_safe_open(*args, **kwargs)
+
+    def metadata(self):
+        meta = self._f.metadata()
+        if meta is None:
+            return {"format": "pt"}
+        return meta
+
+    def __getattr__(self, name):
+        return getattr(self._f, name)
+
+    def __enter__(self):
+        self._f.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self._f.__exit__(*args)
+
+safetensors.safe_open = _SafeOpenWrapper
+import transformers.modeling_utils as _tmu
+if hasattr(_tmu, 'safe_open'):
+    _tmu.safe_open = _SafeOpenWrapper
+
 
 class TeeLogger:
     """Duplicate stdout to both console and a log file."""
@@ -88,6 +117,20 @@ def parser_arguments():
         choices=["true", "false"],
         default="false",
     )
+    parser.add_argument(
+        "--quantize",
+        help="quantize mode: none, W8X8, W8A16, W8A8",
+        type=str,
+        choices=["none", "W8X8", "W8A16", "W8A8"],
+        default="none",
+    )
+    parser.add_argument(
+        "--kv_cache_layout",
+        help="KV cache layout: BSHD (default) or BHSD (transpose-eliminated)",
+        type=str,
+        choices=["BSHD", "BHSD"],
+        default="BSHD",
+    )
     return parser.parse_args()
 
 
@@ -148,6 +191,8 @@ def export_onnx(
     num_hidden_layers: int,
     num_key_value_heads: int,
     per_head_dim: int,
+    quantize_mode: str = "none",
+    kv_cache_layout: str = "BSHD",
 ):
     if device_str == "npu":
         import torch_npu
@@ -160,30 +205,65 @@ def export_onnx(
         raise Exception("unsupport dtype")
 
     device = torch.device(device_str)
-    model = Qwen2ForCausalLM.from_pretrained(
-        hf_model_dir,
-        torch_dtype=torch_dtype,
-        # trust_remote_code=True
-    ).to(device)
+
+    if quantize_mode == "W8A8":
+        from quantize.w8a8_linear import load_w8a8_state_dict
+        safetensors_path = os.path.join(hf_model_dir, "model.safetensors")
+        if not os.path.exists(safetensors_path):
+            candidates = [f for f in os.listdir(hf_model_dir) if f.endswith(".safetensors")]
+            if candidates:
+                safetensors_path = os.path.join(hf_model_dir, candidates[0])
+            else:
+                raise FileNotFoundError(f"No safetensors file found in {hf_model_dir}")
+        print(f"[INFO] Loading W8A8 pre-quantized model from: {safetensors_path}")
+        config = Qwen2Config.from_pretrained(hf_model_dir)
+        model = Qwen2ForCausalLM(config).to(torch_dtype)
+        model = load_w8a8_state_dict(
+            safetensors_path, model, dtype=torch_dtype, device=device,
+            skip_layers=["lm_head"]
+        )
+        model = model.to(device)
+        print(f"[INFO] W8A8 model loaded successfully, {sum(1 for m in model.modules() if hasattr(m, 'weight_int8'))} quantized layers")
+    else:
+        model = Qwen2ForCausalLM.from_pretrained(
+            hf_model_dir,
+            torch_dtype=torch_dtype,
+        ).to(device)
     quantize_cfg = {
-        "query_key_value": {
+        "q_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense": {
+        "k_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense_h_to_4h": {
+        "v_proj": {
             "type": "W8X8",
             "act_scale": False
         },
-        "dense_4h_to_h": {
+        "o_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "gate_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "up_proj": {
+            "type": "W8X8",
+            "act_scale": False
+        },
+        "down_proj": {
             "type": "W8X8",
             "act_scale": False
         }
     }
-    quantize_cfg = {}
+    if quantize_mode in ("none", "W8A8"):
+        quantize_cfg = {}
+    elif quantize_mode == "W8A16":
+        for key in quantize_cfg:
+            quantize_cfg[key]["type"] = "W8A16"
     input_names = [
         "input_ids",
         "attention_mask",
@@ -196,7 +276,7 @@ def export_onnx(
         "input_ids": {0: "batch_size", 1: "seq_length"},
         "attention_mask": {0: "batch_size", 1: "seq_length + kv_len"},
         "position_ids": {0: "batch_size", 1: "seq_length"},
-        "past_key_values": {0: "batch_size", 1: "kv_len"},
+        "past_key_values": {0: "batch_size", 1: "kv_len" if kv_cache_layout == "BSHD" else "num_heads"},
     }
     batch_size = 1
     seq_len = 1
@@ -205,15 +285,26 @@ def export_onnx(
     input_ids = torch.zeros((batch_size, seq_len)).long().to(device)
     attention_mask = torch.zeros((batch_size, all_len)).long().to(device)
     position_ids = torch.zeros((batch_size, seq_len)).long().to(device)
-    past_key_values = torch.rand(
-        (
-            1,
-            kv_cache_length,
-            num_hidden_layers * 2 * num_key_value_heads,
-            per_head_dim
-        ),
-        dtype=torch_dtype
-    ).to(device)
+    if kv_cache_layout == "BHSD":
+        past_key_values = torch.rand(
+            (
+                1,
+                num_hidden_layers * 2 * num_key_value_heads,
+                kv_cache_length,
+                per_head_dim
+            ),
+            dtype=torch_dtype
+        ).to(device)
+    else:
+        past_key_values = torch.rand(
+            (
+                1,
+                kv_cache_length,
+                num_hidden_layers * 2 * num_key_value_heads,
+                per_head_dim
+            ),
+            dtype=torch_dtype
+        ).to(device)
     input_args = (
         input_ids,
         attention_mask,
@@ -228,9 +319,10 @@ def export_onnx(
     )
     model.eval()
     with torch.no_grad():
-        # from quantize import quantize
-        # quantize(model, cfg=quantize_cfg)
-        # print(model)
+        if quantize_cfg:
+            from quantize.quantize_linear import quantize_model
+            quantize_model(model, cfg=quantize_cfg)
+            print(f"[INFO] Model quantized with mode: {quantize_mode}")
         torch.onnx.export(
             model,
             f=onnx_model_path,
@@ -278,6 +370,9 @@ if __name__ == "__main__":
             "AutoModelForSeq2SeqLM": "modeling_qwen2.Qwen2ForCausalLM",
             "AutoModelForSequenceClassification": "modeling_qwen2.Qwen2ForSequenceClassification"
         }
+        # Remove msmodelslim's custom quantization_config to avoid transformers
+        # misinterpreting it as bitsandbytes config during from_pretrained
+        model_config.pop("quantization_config", None)
         with open(config_json, "wt", encoding="utf-8") as f:
             json.dump(model_config, f, indent=4)
         test_model_config = Qwen2Config.from_pretrained(args.hf_model_dir)
@@ -298,7 +393,9 @@ if __name__ == "__main__":
             kv_cache_length=args.kv_cache_length,
             num_hidden_layers=num_hidden_layers,
             num_key_value_heads=num_key_value_heads,
-            per_head_dim=per_head_dim
+            per_head_dim=per_head_dim,
+            quantize_mode=args.quantize,
+            kv_cache_layout=args.kv_cache_layout,
         )
         print("onnx export done, save in ", args.onnx_model_path)
         print_onnx_node_info(args.onnx_model_path)
