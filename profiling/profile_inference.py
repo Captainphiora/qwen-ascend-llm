@@ -10,6 +10,11 @@ Profiling 采集脚本：使用 ACL Python API 在代码内部采集性能数据
     bash run_profiling.sh --parse
 """
 
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+
 import sys
 import os
 import time

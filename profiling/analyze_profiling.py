@@ -9,7 +9,7 @@ import os
 import csv
 import sys
 
-PROF_BASE_DIR = "./profiling_data"
+PROF_BASE_DIR = os.path.join(os.path.dirname(__file__), "data")
 PROF_DIR = None
 
 

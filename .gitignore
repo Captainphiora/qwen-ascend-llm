@@ -1,34 +1,55 @@
 .idea
 .vscode
-download/
-output/
-inference/
-kernel_meta/
+.venv/
 __pycache__/
 **/__pycache__/
-export/*.json
-fusion_result.json
-result/
-.venv/
 *.pyc
 *.egg-info/
+
+# Model files
+download/
+models/
+output/
+*.om
+
+# Export artifacts
+export/*.json
+fusion_result.json
 ge_check_op.json
 ops_info.json
 ops_info_new.json
-results/
-results*/
-*.log
-*.jsonl
-/compare*
-/math*
-*.om
+
+# Profiling data
+profiling/output/
+profiling/sampling_data/
+profiling/data/
 profiling_output/
 profiling_data/
 profiling_sampling_data/
-opt_models/
 opt_profiling/
+
+# Benchmark results
+benchmarks/results/
+benchmarks/opt/
 benchmark_results/
 benchmark_results_sim/
+
+# Logs
+logs/
+*.log
+
+# Runtime artifacts
+kernel_meta/
+inference/
+result/
+opt_models/
+
+# Misc
+results/
+results*/
+*.jsonl
+/compare*
+/math*
 2026-*.txt
 *.html
 check_result.json

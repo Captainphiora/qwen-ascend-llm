@@ -15,6 +15,11 @@
   python benchmark.py --label optimized_rope --om_model_path ./output/model_opt/xxx.om
 """
 
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+
 import argparse
 import sys
 import os
@@ -26,13 +31,11 @@ from typing import List
 # ============================================================
 # 默认配置
 # ============================================================
-DEFAULT_HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
-# DEFAULT_OM_MODEL_PATH = "./output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
-# DEFAULT_OM_MODEL_PATH = "opt_models/v0_baseline/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v0_baseline.om"
-DEFAULT_OM_MODEL_PATH = "opt_models/v4_noexpand/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand.om"
+DEFAULT_HF_MODEL_DIR = "/home/chenxinji/models/DeepSeek-R1-Distill-Qwen-1.5B"
+DEFAULT_OM_MODEL_PATH = "output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand_310b.om"
 
 
-DEVICE_ID=5
+DEVICE_ID=0
 @dataclass
 class BenchmarkResult:
     prompt_tokens: int = 0

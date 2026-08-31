@@ -12,6 +12,11 @@ Profiling 采集脚本：加载 OM 模型，采集推理 profiling 数据。
         --max_new_tokens 20
 """
 
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+
 import argparse
 import os
 import sys

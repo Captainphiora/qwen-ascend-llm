@@ -47,7 +47,10 @@ class Inference:
         self.use_npu_sampling = (
             HAS_TORCH_NPU
             and config.session_type == "acl"
-            and os.environ.get("USE_NPU_SAMPLING", "0") == "1"
+            and (
+                config.sampling_device == "npu"
+                or os.environ.get("USE_NPU_SAMPLING", "0") == "1"
+            )
         )
         if HAS_TORCH_NPU and config.session_type == "acl":
             self.npu_sampling_device = f"npu:{config.device_id}"

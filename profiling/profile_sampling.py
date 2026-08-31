@@ -16,6 +16,11 @@
   msprof --export=on --output=./profiling_sampling_data/
 """
 
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+
 import argparse
 import sys
 import os
@@ -202,9 +207,29 @@ def print_profile_report(results: dict, args):
 
         # Hardware utilization estimate
         print(f"\n  ┌── 硬件利用率估算 {'─' * 54}┐")
-        # 910: 320 TFLOPS FP16, HBM bandwidth ~1.2TB/s
-        peak_tflops = 320.0  # FP16 for 910
-        peak_bw_gbs = 1200.0  # HBM bandwidth GB/s
+        # Auto-detect chip type from npu-smi or environment
+        chip_type = os.environ.get("ASCEND_CHIP_TYPE", "").upper()
+        if not chip_type:
+            try:
+                import subprocess
+                npu_info = subprocess.check_output(["npu-smi", "info"], timeout=5, stderr=subprocess.DEVNULL).decode()
+                if "310B" in npu_info:
+                    chip_type = "310B"
+                elif "910C" in npu_info or "910B" in npu_info:
+                    chip_type = "910"
+                else:
+                    chip_type = "910"
+            except Exception:
+                chip_type = "910"
+
+        if "310B" in chip_type:
+            peak_tflops = 10.0    # FP16 for 310B1 (20T)
+            peak_bw_gbs = 51.2   # LPDDR4X bandwidth GB/s
+            mem_type = "LPDDR4X"
+        else:
+            peak_tflops = 320.0   # FP16 for 910
+            peak_bw_gbs = 1200.0  # HBM bandwidth GB/s
+            mem_type = "HBM"
         if result.decode_steps > 0:
             avg_infer_ms = result.device_inference_time_ms / result.decode_steps
             # Model params ~1.5B, FP16 = 3GB, each decode step: 2*params FLOPS (matmul)
@@ -221,7 +246,7 @@ def print_profile_report(results: dict, args):
             print(f"  │ 平台峰值算力:   {peak_tflops:.0f} TFLOPS (FP16)                               │")
             print(f"  │ 实际算力:        {achieved_tflops:.2f} TFLOPS (FP16)                              │")
             print(f"  │ 算力利用率:      {utilization:.1f}%                                            │")
-            print(f"  │ HBM 峰值带宽:   {peak_bw_gbs:.0f} GB/s                                         │")
+            print(f"  │ {mem_type} 峰值带宽:   {peak_bw_gbs:.1f} GB/s                                         │")
             print(f"  │ 实际带宽:        {achieved_bw:.1f} GB/s                                         │")
             print(f"  │ 带宽利用率:      {bw_utilization:.1f}%                                            │")
             print(f"  │ 瓶颈分析:        {'带宽瓶颈 (Memory-bound)' if bw_utilization > utilization else '计算瓶颈 (Compute-bound)'}          │")

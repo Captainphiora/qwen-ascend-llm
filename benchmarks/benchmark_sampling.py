@@ -9,6 +9,11 @@
   python benchmark_sampling.py --device_id 7 --max_new_tokens 100 --rounds 3
 """
 
+import sys as _sys
+import os as _os
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+
+
 import argparse
 import sys
 import os
@@ -17,8 +22,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import List
 
-DEFAULT_HF_MODEL_DIR = "/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
-DEFAULT_OM_MODEL_PATH = "output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
+DEFAULT_HF_MODEL_DIR = "/home/chenxinji/models/DeepSeek-R1-Distill-Qwen-1.5B"
+DEFAULT_OM_MODEL_PATH = "output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand_310b.om"
 
 
 @dataclass
@@ -143,7 +148,7 @@ def print_comparison(all_results: dict, args):
 
 def main():
     parser = argparse.ArgumentParser(description="采样策略性能对比基准测试")
-    parser.add_argument("--device_id", type=int, default=7)
+    parser.add_argument("--device_id", type=int, default=0)
     parser.add_argument("--om_model_path", type=str, default=DEFAULT_OM_MODEL_PATH)
     parser.add_argument("--hf_model_dir", type=str, default=DEFAULT_HF_MODEL_DIR)
     parser.add_argument("--kv_cache_length", type=int, default=4096)
@@ -152,6 +157,8 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=100)
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--npu-only", action="store_true", default=False,
+                        help="只运行 NPU 采样测试，跳过 CPU 采样")
     args = parser.parse_args()
 
     from config import InferenceConfig
@@ -189,12 +196,14 @@ def main():
 
     # Test configurations
     # NPU ATB 测试需要设置 USE_NPU_SAMPLING=1 (会产生退出时的 harmless warning)
-    test_configs = [
-        ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, False),
-        ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
-        ("Top-p=0.95 (CPU numpy)", "top_p", 0.95, 0.7, False),
-        ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
-    ]
+    test_configs = []
+    if not args.npu_only:
+        test_configs = [
+            ("Greedy (CPU argmax)", "greedy", 0.8, 0.0, False),
+            ("Top-p=0.8 (CPU numpy)", "top_p", 0.8, 0.7, False),
+            ("Top-p=0.95 (CPU numpy)", "top_p", 0.95, 0.7, False),
+            ("Top-k=50 (CPU numpy)", "top_k", 50, 0.7, False),
+        ]
     if npu_sampling_available and infer_engine.use_npu_sampling:
         test_configs.extend([
             ("Top-p=0.8 (NPU ATB)", "top_p", 0.8, 0.7, True),

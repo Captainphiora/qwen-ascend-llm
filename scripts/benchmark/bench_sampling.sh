@@ -13,26 +13,36 @@
 #   bash scripts/bench_sampling.sh --prof-only  # 仅 Part 2+3
 #   bash scripts/bench_sampling.sh --no-acl     # 跳过 Part 3 (ACL算子profiling)
 #   bash scripts/bench_sampling.sh --device_id=5
+#   bash scripts/bench_sampling.sh --npu-sampling
 # ============================================================
 
 set -e
 
 # ---- 配置参数 (按需修改) ----
-DEVICE_ID=7
-OM_MODEL_PATH="output/model_910_cann900/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
-HF_MODEL_DIR="/mnt/host-model/cxj/models/DeepSeek-R1-Distill-Qwen-1.5B"
+DEVICE_ID=0
+# OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1.om"
+OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand_310b.om"
+HF_MODEL_DIR="../models/DeepSeek-R1-Distill-Qwen-1.5B"
 KV_CACHE_LENGTH=4096
 MAX_PREFILL_LENGTH=1
 PROMPT="请详细介绍一下机器学习的基本概念和常用算法"
 MAX_NEW_TOKENS=100
-ROUNDS=3
+ROUNDS=1
 WARMUP=1
 PROFILING_DIR="./profiling_sampling_data"
 PROF_MAX_TOKENS=20   # ACL profiling 仅采集少量 token (减少数据量)
 # ---- 配置结束 ----
 
 # 加载 CANN 环境
-source ~/.bashrc_cann900
+if [ -f "/usr/local/Ascend/cann-9.0.0/set_env.sh" ]; then
+    source /usr/local/Ascend/cann-9.0.0/set_env.sh
+elif [ -n "$ASCEND_TOOLKIT_HOME" ] && [ -f "$ASCEND_TOOLKIT_HOME/set_env.sh" ]; then
+    source "$ASCEND_TOOLKIT_HOME/set_env.sh"
+fi
+
+# 低内存模式: 使用 acl.mdl.load_from_file 避免分配与OM等大的pinned host内存
+# 适用于主机RAM不足的环境(如310B开发板), 代价是模型加载速度变慢
+export ACL_LOAD_FROM_FILE=1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
@@ -83,11 +93,20 @@ if [ ! -f "$MSPROF" ]; then
     MSPROF=$(find /usr/local/Ascend -name "msprof" -path "*/cann-9*/bin/msprof" 2>/dev/null | head -1)
 fi
 
-OUTPUT_FILE="${RESULT_DIR}/sampling_full_report_${TIMESTAMP}.txt"
+# 检测芯片型号
+CHIP_TYPE=$(npu-smi info 2>/dev/null | grep -oP '\d+B\d*' | head -1)
+if [ -z "$CHIP_TYPE" ]; then
+    CHIP_TYPE=$(npu-smi info 2>/dev/null | grep -oP '910[A-Z]?' | head -1)
+fi
+if [ -z "$CHIP_TYPE" ]; then
+    CHIP_TYPE="unknown"
+fi
+
+OUTPUT_FILE="${RESULT_DIR}/sampling_full_report_${TIMESTAMP}_${CHIP_TYPE}.txt"
 
 echo "============================================================" | tee "$OUTPUT_FILE"
 echo " 采样策略完整性能测试 & Profiling 报告" | tee -a "$OUTPUT_FILE"
-echo " Device: npu:${DEVICE_ID}" | tee -a "$OUTPUT_FILE"
+echo " Device: npu:${DEVICE_ID} (${CHIP_TYPE})" | tee -a "$OUTPUT_FILE"
 echo " Model:  ${OM_MODEL_PATH}" | tee -a "$OUTPUT_FILE"
 echo " Time:   ${TIMESTAMP}" | tee -a "$OUTPUT_FILE"
 echo "============================================================" | tee -a "$OUTPUT_FILE"
@@ -162,11 +181,23 @@ if [ "$RUN_ACL_PROF" = true ]; then
 
         echo "" | tee -a "$OUTPUT_FILE"
 
-        # 解析: msprof --export
+        # 解析: msprof export (使用 Python profiler_tool)
         PROF_SUBDIR=$(find "$PROFILING_DIR" -maxdepth 1 -type d -name "PROF_*" | sort | tail -1)
         if [ -n "$PROF_SUBDIR" ]; then
             echo ">>> 解析 Profiling 数据: $PROF_SUBDIR" | tee -a "$OUTPUT_FILE"
-            "$MSPROF" --export=on --output="$PROF_SUBDIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+            # 优先使用 Python profiler_tool (兼容 310B 等不支持 --export 的平台)
+            PROFILER_TOOL_DIR="${ASCEND_TOOLKIT_HOME:-/usr/local/Ascend/cann-9.0.0}/tools/profiler/profiler_tool/analysis"
+            if [ -d "$PROFILER_TOOL_DIR" ]; then
+                PYTHONPATH="$PROFILER_TOOL_DIR" python3 -c "
+import sys
+sys.argv = ['msprof', 'export', 'summary', '-dir', '$PROF_SUBDIR']
+from msinterface.msprof_entrance import MsprofEntrance
+e = MsprofEntrance()
+e.main()
+" 2>&1 | tee -a "$OUTPUT_FILE" || true
+            else
+                "$MSPROF" --export=on --output="$PROF_SUBDIR" 2>&1 | tee -a "$OUTPUT_FILE" || true
+            fi
         fi
 
         echo "" | tee -a "$OUTPUT_FILE"

@@ -219,9 +219,22 @@ class ACLModel:
         # self.model_id, ret = acl.mdl.load_from_mem(model_add, model_size)
         # check_ret("load model",ret)
         # munmap_func(model_add, model_size)
-        # 方法2：直接加载model，用时34秒
-        # self.model_id, ret = acl.mdl.load_from_file(model_path)
-        # check_ret("load model",ret)
+
+        # 方法2：直接从文件加载model，用时34秒，但不需要额外分配pinned host内存
+        # 适用于主机内存不足的场景（OM文件较大时方法3需要等量pinned内存）
+        if os.environ.get("ACL_LOAD_FROM_FILE", "0") == "1":
+            st = time.time()
+            print("[INFO] load model from file (low-memory mode), please wait a moment...")
+            self.model_id, ret = acl.mdl.load_from_file(model_path)
+            check_ret("load model", ret)
+            et = time.time()
+            print(f"[INFO] load model duration: ", et - st)
+            print("[INFO] get model desc")
+            self.model_desc = acl.mdl.create_desc()
+            ret = acl.mdl.get_desc(self.model_desc, self.model_id)
+            check_ret("get model desc", ret)
+            return
+
         # 方法3：将模型加载到device内存中 
         # 先获取模型大小
         model_buffer_size = os.path.getsize(model_path)

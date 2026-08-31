@@ -138,6 +138,13 @@ def parser_args():
         default=SYSTEM_PROMPT,
     ),
     parser.add_argument(
+        "--sampling_device",
+        help="sampling device: cpu uses numpy sampling, npu uses torch_npu on-device sampling (zero-copy)",
+        type=str,
+        default="cpu",
+        choices=["cpu", "npu"],
+    )
+    parser.add_argument(
         "--device_id",
         type=int,
         default=0,
@@ -205,7 +212,8 @@ def main_cli():
         sampling_value=args.sampling_value,
         system_prompt=args.system_prompt,
         device_str=args.device_str,
-        device_id=args.device_id
+        device_id=args.device_id,
+        sampling_device=args.sampling_device,
     )
     print("==================== 实际生效的推理配置(config) ====================")
     print("session_type      : {}".format(config.session_type))
@@ -228,6 +236,7 @@ def main_cli():
     print("-------------------- 采样相关(是否 greedy) --------------------")
     print("sampling_method   : {}".format(config.sampling_method))
     print("sampling_value : {}".format(config.sampling_value))
+    print("sampling_device   : {}".format(config.sampling_device))
     print("temperature       : {}".format(config.temperature))
     is_greedy = (config.temperature == 0) or (config.sampling_method == "greedy")
     print("=> 实际是否 greedy : {}".format(is_greedy))

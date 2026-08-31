@@ -144,13 +144,13 @@
   ```
 
 - demo展示1（演示模型，qwen1.5-0.5b-chat，未开启动态shape推理）
-![](./image/qwen1.5_0.5b_chat.gif)
+![](./assets/qwen1.5_0.5b_chat.gif)
 
 - demo展示2（演示模型，qwen2-1.5b-instruct，开启动态shape推理, max_prefill_length=8）
-![](./image/qwen2-1.5b-instruct.gif)
+![](./assets/qwen2-1.5b-instruct.gif)
 
 - demo展示3（演示模型，qwen2-1.5b-instruct，onnx cpu推理，CPU: i9-10900k 10核20线程）
-![](./image/qwen2_1.5b_onnx_chat_cpu.png)
+![](./assets/qwen2_1.5b_onnx_chat_cpu.png)
 
 
 ##### 步骤3：部署兼容OpenAI的api
@@ -171,7 +171,7 @@
   # openai_function_call.py 测试function_call，该功能启用时建议增加max_input_length和kv_cache_length的长度。
   ```
 
-- functional_call demo展示(使用qwen2-1.5b-instruct)![](./image/qwen2-1.5b-instruct-functional-call.jpg)
+- functional_call demo展示(使用qwen2-1.5b-instruct)![](./assets/qwen2-1.5b-instruct-functional-call.jpg)
 
 ### （可选）对比onnx和om网络层结果
 - 假设编译好的om文件推理输出异常（比如origin或者fp32精度正常，fp16异常），而onnx输出正常，我们需要找到异常的网络层结构，我们需要使用工具来导出onnx和om每一层的输入输出结果，看看是哪一层开始溢出或者结果差异较大。
