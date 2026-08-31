@@ -3,20 +3,24 @@
 # v4 / v5 / v6 性能对比 + Profiling
 #
 # 用法:
-#   bash scripts/run_v456_comparison.sh
+#   bash scripts/run_v456_comparison.sh                 # 默认含格式化分析
+#   bash scripts/run_v456_comparison.sh --no-analysis   # 只采集+解析CSV,不跑分析脚本
 #
-# 每个版本执行:
-#   1. Benchmark: 3 轮 greedy, 30 tokens → TPOT / Decode / TTFT
-#   2. Profiling: msprof 采集 → msprof 解析为 CSV
-#
-# Profiling 产物 (直接看 CSV 即可):
-#   profiling_<version>/PROF_xxx/mindstudio_profiler_output/
-#     ├── op_statistic_xxx.csv   ← 按算子类型聚合 (最常看)
-#     ├── op_summary_xxx.csv     ← 每个 kernel 详情 (含 shape/耗时/利用率)
-#     ├── task_time_xxx.csv      ← 时间线
-#     └── api_statistic_xxx.csv  ← ACL API 调用统计
-#
-# 可选: parse_profiling.py 格式化输出 (非必须, CSV 已包含全部信息)
+# 产物结构:
+#   results/v456_<timestamp>/
+#     ├── benchmark_v4_noexpand.txt          ← 推理性能
+#     ├── benchmark_v5_gate_up_fuse.txt
+#     ├── benchmark_v6_transpose_elim.txt
+#     ├── analysis_v4_noexpand.txt           ← 格式化分析 (--no-analysis 时不生成)
+#     ├── analysis_v5_gate_up_fuse.txt
+#     ├── analysis_v6_transpose_elim.txt
+#     ├── profiling_v4_noexpand/             ← msprof 原始数据 + CSV
+#     │   └── PROF_xxx/mindstudio_profiler_output/
+#     │       ├── op_statistic_xxx.csv       ← 按算子类型聚合
+#     │       ├── op_summary_xxx.csv         ← 每个 kernel 详情
+#     │       └── ...
+#     ├── profiling_v5_gate_up_fuse/
+#     └── profiling_v6_transpose_elim/
 # ============================================================
 
 set -e
@@ -27,7 +31,16 @@ cd "$PROJECT_DIR"
 HF_MODEL_DIR="${HF_MODEL_DIR:-/root/models/DeepSeek-R1-Distill-Qwen-1.5B}"
 DEVICE_ID="${DEVICE_ID:-0}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-RESULT_DIR="results/v456_comparison_${TIMESTAMP}"
+RESULT_DIR="results/v456_${TIMESTAMP}"
+RUN_ANALYSIS=true
+
+# 解析参数
+for arg in "$@"; do
+    case $arg in
+        --no-analysis) RUN_ANALYSIS=false ;;
+    esac
+done
+
 mkdir -p "$RESULT_DIR"
 
 MSPROF=${ASCEND_HOME_PATH:-/usr/local/Ascend/ascend-toolkit/latest}/tools/profiler/bin/msprof
@@ -41,8 +54,9 @@ declare -a VERSIONS=(
 
 echo "============================================================"
 echo " v4 / v5 / v6 性能对比 + Profiling"
-echo " 时间: $TIMESTAMP"
-echo " 输出: $RESULT_DIR/"
+echo " 时间:   $TIMESTAMP"
+echo " 输出:   $RESULT_DIR/"
+echo " 分析:   $RUN_ANALYSIS"
 echo "============================================================"
 
 for entry in "${VERSIONS[@]}"; do
@@ -56,8 +70,8 @@ for entry in "${VERSIONS[@]}"; do
         continue
     fi
 
-    # Benchmark
-    echo "    Benchmark..."
+    # --- Benchmark ---
+    echo "    [1/3] Benchmark..."
     python benchmarks/benchmark.py \
         --om_model_path "$OM_PATH" \
         --hf_model_dir "$HF_MODEL_DIR" \
@@ -70,8 +84,8 @@ for entry in "${VERSIONS[@]}"; do
         --label "$LABEL" \
         2>&1 | tee "$RESULT_DIR/benchmark_${LABEL}.txt"
 
-    # Profiling: 采集
-    echo "    Profiling 采集..."
+    # --- Profiling: msprof 采集 ---
+    echo "    [2/3] Profiling 采集..."
     PROF_DIR="$RESULT_DIR/profiling_${LABEL}"
     mkdir -p "$PROF_DIR"
     $MSPROF --output="$PROF_DIR" \
@@ -82,38 +96,43 @@ for entry in "${VERSIONS[@]}"; do
                 --device_id $DEVICE_ID" \
         2>&1 | tee "$RESULT_DIR/msprof_collect_${LABEL}.log"
 
-    # Profiling: 解析为 CSV
-    echo "    Profiling 解析..."
+    # --- Profiling: msprof 解析为 CSV ---
+    echo "    [3/3] Profiling 解析..."
     PROF_DATA=$(find "$PROF_DIR" -maxdepth 2 -name "PROF_*" -type d | sort | tail -n 1)
     if [ -n "$PROF_DATA" ]; then
         $MSPROF --export=on --output="$PROF_DATA" --type=text --summary-format=csv \
             2>&1 | tee "$RESULT_DIR/msprof_export_${LABEL}.log"
-        echo "    CSV 输出: $PROF_DATA/mindstudio_profiler_output/"
 
-        # 可选: 格式化打印
-        if [ -f "benchmarks/parse_profiling.py" ]; then
-            python benchmarks/parse_profiling.py --prof_dir "$PROF_DATA" --label "$LABEL" \
+        # 格式化分析 (可通过 --no-analysis 跳过)
+        if [ "$RUN_ANALYSIS" = true ] && [ -f "benchmarks/parse_profiling.py" ]; then
+            python benchmarks/parse_profiling.py \
+                --prof_dir "$PROF_DATA" --label "$LABEL" \
                 2>&1 | tee "$RESULT_DIR/analysis_${LABEL}.txt"
         fi
     fi
 
-    echo "    [$LABEL] 完成"
+    echo "    [$LABEL] done"
 done
 
+# ============================================================
 # 汇总
+# ============================================================
 echo ""
 echo "============================================================"
 echo " 汇总"
 echo "============================================================"
+printf "  %-25s %10s %14s %10s\n" "版本" "TPOT(ms)" "Decode(tok/s)" "TTFT(ms)"
+echo "  -----------------------------------------------------------"
 for f in "$RESULT_DIR"/benchmark_*.txt; do
     [ -f "$f" ] || continue
     label=$(basename "$f" .txt | sed 's/benchmark_//')
     tpot=$(grep "TPOT" "$f" | grep -oP '[\d.]+(?= ms)' | head -1)
     decode=$(grep "Decode 速度" "$f" | grep -oP '[\d.]+(?= tokens)' | head -1)
     ttft=$(grep "TTFT" "$f" | grep -oP '[\d.]+(?= ms)' | head -1)
-    printf "  %-25s TPOT=%s ms  Decode=%s tok/s  TTFT=%s ms\n" "$label" "$tpot" "$decode" "$ttft"
+    printf "  %-25s %10s %14s %10s\n" "$label" "$tpot" "$decode" "$ttft"
 done
 echo ""
-echo "结果目录: $RESULT_DIR/"
-echo "Profiling CSV: $RESULT_DIR/profiling_*/PROF_*/mindstudio_profiler_output/*.csv"
+echo " 结果目录: $RESULT_DIR/"
+echo " CSV 路径: $RESULT_DIR/profiling_*/PROF_*/mindstudio_profiler_output/*.csv"
+[ "$RUN_ANALYSIS" = true ] && echo " 分析报告: $RESULT_DIR/analysis_*.txt"
 echo "============================================================"
