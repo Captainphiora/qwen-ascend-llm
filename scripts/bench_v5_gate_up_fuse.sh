@@ -1,0 +1,23 @@
+#!/bin/bash
+# 310B1 一键 benchmark: v5_gate_up_fuse
+# 用法: bash scripts/bench_v5_gate_up_fuse.sh [--om_model_path /path/to/v5.om]
+#
+# 默认 OM 路径: opt_models/v5_gate_up_fuse_310b/*.om
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+PROJECT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$PROJECT_DIR"
+
+DEFAULT_OM="opt_models/v5_gate_up_fuse_310b/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v5_gate_up_fuse_310b.om"
+HF_MODEL_DIR="/root/models/DeepSeek-R1-Distill-Qwen-1.5B"
+
+python benchmarks/benchmark.py \
+    --om_model_path "${1:-$DEFAULT_OM}" \
+    --hf_model_dir "$HF_MODEL_DIR" \
+    --kv_cache_length 4096 \
+    --max_prefill_length 1 \
+    --max_new_tokens 30 \
+    --rounds 3 \
+    --warmup 1 \
+    --label v5_gate_up_fuse_310b \
+    "$@"

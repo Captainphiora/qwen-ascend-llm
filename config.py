@@ -27,6 +27,7 @@ class InferenceConfig:
         torch_dtype: str = "float16",
         device_str: str = "cpu",
         sampling_device: str = "cpu",
+        kv_cache_layout: str = "BSHD",
     ):
         self.tokenizer_dir = hf_model_dir
         self.session_type = session_type
@@ -66,12 +67,20 @@ class InferenceConfig:
         self.hidden_size = self.model_config.hidden_size # hidden_dim
         self.num_attention_heads = self.model_config.num_attention_heads
         self.per_head_dim = self.hidden_size // self.num_attention_heads # head_dim
-        self.past_key_value_shape = (
-            self.max_batch,
-            self.kv_cache_length,
-            # 28*2*2 = 112
-            self.num_hidden_layers * 2 * self.num_key_value_heads,
-            self.per_head_dim
-        )
+        self.kv_cache_layout = kv_cache_layout
+        if kv_cache_layout == "BHSD":
+            self.past_key_value_shape = (
+                self.max_batch,
+                self.num_hidden_layers * 2 * self.num_key_value_heads,
+                self.kv_cache_length,
+                self.per_head_dim
+            )
+        else:
+            self.past_key_value_shape = (
+                self.max_batch,
+                self.kv_cache_length,
+                self.num_hidden_layers * 2 * self.num_key_value_heads,
+                self.per_head_dim
+            )
         self.max_prefill_length = max_prefill_length
         self.vocab_size = self.model_config.vocab_size

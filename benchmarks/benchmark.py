@@ -181,6 +181,7 @@ def main():
                         help="本次测试标签 (如 'baseline' / 'optimized_rope')")
     parser.add_argument("--device_id", type=int, default=0,
                         )
+    parser.add_argument("--kv_cache_layout", type=str, default="BSHD", choices=["BSHD", "BHSD"])
     args = parser.parse_args()
 
     from config import InferenceConfig
@@ -210,6 +211,7 @@ def main():
         sampling_method="greedy",
         sampling_value=0.95,
         system_prompt="",
+        kv_cache_layout=args.kv_cache_layout,
     )
     infer_engine = Inference(config)
     session = infer_engine.session

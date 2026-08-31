@@ -104,8 +104,12 @@ class ACLModel:
         self.outputs:List[Dict[str,]] =  []
         self.config = config
         self.past_key_value_shape = config.past_key_value_shape
+        self.kv_cache_layout = config.kv_cache_layout
         self.half_past_key_value_shape = list(config.past_key_value_shape)
-        self.half_past_key_value_shape[1] = self.half_past_key_value_shape[1] // 2
+        if config.kv_cache_layout == "BHSD":
+            self.half_past_key_value_shape[2] = self.half_past_key_value_shape[2] // 2
+        else:
+            self.half_past_key_value_shape[1] = self.half_past_key_value_shape[1] // 2
         self.load_model(config.om_model_path)
         self.allocate_memory()
         if not callback:
@@ -172,28 +176,36 @@ class ACLModel:
             seq_len = self.kv_cache_length - self.real_kv_size
         if seq_len <= 0:
             return
-        # 用device memory完成下面的操作
-        # self.kv_cache[:, self.real_kv_size: self.real_kv_size + seq_len] = new_kv_cache[:, 0: seq_len]
-        # kv-cache shape
-        """
-        new_kv_cache_shape = [
-            self.max_batch,
-            seq_length,
-            self.config.num_hidden_layers * 2 * self.config.num_key_value_heads,
-            self.config.per_head_dim
-        ]
-        """
-        base_size = self.config.num_hidden_layers * 2 * self.config.num_key_value_heads * self.config.per_head_dim
-        # print("base_size: ", base_size)
-        # 默认是void指针，想要往前切片，需要将数据个数 * 2（代表float16)偏移
-        ret = acl.rt.memcpy(
-            self.inputs[3]["buffer"] + (base_size * self.real_kv_size * self.max_batch) * 2, # 目的内存地址指针地址。
-            base_size * (self.kv_cache_length - self.real_kv_size) * 2, # 目的内存地址的最大内存长度，单位Byte。
-            self.outputs[1]["buffer"],
-            base_size * seq_len * 2,
-            ACL_MEMCPY_DEVICE_TO_DEVICE
-        )
-        check_ret("update device cache", ret)
+
+        if self.kv_cache_layout == "BHSD":
+            n_heads = self.config.num_hidden_layers * 2 * self.config.num_key_value_heads
+            head_dim = self.config.per_head_dim
+            elem_bytes = 2
+            chunk = head_dim * seq_len * elem_bytes
+            dst_stride = self.kv_cache_length * head_dim * elem_bytes
+            src_stride = seq_len * head_dim * elem_bytes
+            for h in range(n_heads):
+                dst_off = h * dst_stride + self.real_kv_size * head_dim * elem_bytes
+                src_off = h * src_stride
+                ret = acl.rt.memcpy(
+                    self.inputs[3]["buffer"] + dst_off,
+                    chunk,
+                    self.outputs[1]["buffer"] + src_off,
+                    chunk,
+                    ACL_MEMCPY_DEVICE_TO_DEVICE
+                )
+                check_ret("update device cache (BHSD)", ret)
+        else:
+            base_size = self.config.num_hidden_layers * 2 * self.config.num_key_value_heads * self.config.per_head_dim
+            ret = acl.rt.memcpy(
+                self.inputs[3]["buffer"] + (base_size * self.real_kv_size * self.max_batch) * 2,
+                base_size * (self.kv_cache_length - self.real_kv_size) * 2,
+                self.outputs[1]["buffer"],
+                base_size * seq_len * 2,
+                ACL_MEMCPY_DEVICE_TO_DEVICE
+            )
+            check_ret("update device cache", ret)
+
         self.real_kv_size += seq_len
     
     def unload(self):
