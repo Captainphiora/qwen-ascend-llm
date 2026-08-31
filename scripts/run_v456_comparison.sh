@@ -86,11 +86,11 @@ for entry in "${VERSIONS[@]}"; do
 
     # --- Profiling: msprof 采集 ---
     echo "    [2/3] Profiling 采集..."
-    PROF_DIR="$RESULT_DIR/profiling_${LABEL}"
+    PROF_DIR="$(realpath "$RESULT_DIR")/profiling_${LABEL}"
     mkdir -p "$PROF_DIR"
     $MSPROF --output="$PROF_DIR" \
-            --application="python benchmarks/profile_decode.py \
-                --om_model_path $OM_PATH \
+            --application="python $(realpath benchmarks/profile_decode.py) \
+                --om_model_path $(realpath $OM_PATH) \
                 --hf_model_dir $HF_MODEL_DIR \
                 --kv_cache_layout $KV_LAYOUT \
                 --device_id $DEVICE_ID" \
@@ -100,8 +100,13 @@ for entry in "${VERSIONS[@]}"; do
     echo "    [3/3] Profiling 解析..."
     PROF_DATA=$(find "$PROF_DIR" -maxdepth 2 -name "PROF_*" -type d | sort | tail -n 1)
     if [ -n "$PROF_DATA" ]; then
-        $MSPROF --export=on --output="$PROF_DATA" --type=text --summary-format=csv \
-            2>&1 | tee "$RESULT_DIR/msprof_export_${LABEL}.log"
+        PROF_DATA=$(realpath "$PROF_DATA")
+        # 兼容不同 CANN 版本: 优先 --export=on, 失败则用 --parse=on
+        if ! $MSPROF --output="$PROF_DATA" --export=on --type=text --summary-format=csv 2>&1 | tee "$RESULT_DIR/msprof_export_${LABEL}.log"; then
+            echo "    [WARN] --export=on 失败, 尝试 --parse=on"
+            $MSPROF --output="$PROF_DATA" --parse=on --type=text --summary-format=csv \
+                2>&1 | tee "$RESULT_DIR/msprof_export_${LABEL}.log"
+        fi
 
         # 格式化分析 (可通过 --no-analysis 跳过)
         if [ "$RUN_ANALYSIS" = true ] && [ -f "benchmarks/parse_profiling.py" ]; then
