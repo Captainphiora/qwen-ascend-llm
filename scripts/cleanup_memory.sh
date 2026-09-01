@@ -11,7 +11,7 @@
 #   3. 确认 SWAP 使用量为 0，否则强制回收
 #   4. 打印清理前后的内存状态对比
 
-set -euo pipefail
+set -uo pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -125,14 +125,6 @@ reclaim_swap() {
         return
     fi
 
-    local sys_avail
-    sys_avail=$(get_sys_mem_available_mb)
-
-    if (( sys_avail < swap_used + 256 )); then
-        log_error "系统可用内存 ${sys_avail} MB 不足以回收 SWAP ${swap_used} MB，请先释放内存"
-        return 1
-    fi
-
     log_warn "SWAP 使用 ${swap_used} MB，正在回收 (swapoff/swapon)..."
     swapoff -a 2>/dev/null && swapon -a 2>/dev/null || {
         log_error "SWAP 回收失败，请手动处理"
@@ -161,18 +153,18 @@ echo "========================================"
 echo " 内存清理工具 — Atlas 200I A2 (310B1)"
 echo "========================================"
 
-print_status "当前状态"
+print_status "当前状态" || true
 
 if $CHECK_ONLY; then
-    exit $?
+    exit 0
 fi
 
 echo ""
 log_info "开始清理..."
 
-kill_npu_python_procs
-flush_page_cache
-reclaim_swap
-set_swappiness_zero
+kill_npu_python_procs   || log_warn "NPU 进程清理异常，继续执行"
+flush_page_cache        || log_warn "页缓存清理异常，继续执行"
+reclaim_swap            || log_warn "SWAP 回收异常，继续执行"
+set_swappiness_zero     || log_warn "swappiness 设置异常，继续执行"
 
-print_status "清理后"
+print_status "清理后" || true

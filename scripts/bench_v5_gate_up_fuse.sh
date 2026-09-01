@@ -9,7 +9,7 @@ PROJECT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
 cd "$PROJECT_DIR"
 
 DEFAULT_OM="opt_models/v5_gate_up_fuse_310b/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v5_gate_up_fuse_310b.om"
-HF_MODEL_DIR="/root/models/DeepSeek-R1-Distill-Qwen-1.5B"
+HF_MODEL_DIR="../models/DeepSeek-R1-Distill-Qwen-1.5B"
 
 python benchmarks/benchmark.py \
     --om_model_path "${1:-$DEFAULT_OM}" \

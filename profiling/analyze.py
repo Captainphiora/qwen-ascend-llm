@@ -196,7 +196,7 @@ def analyze_data_transfer(prof_dir, out):
         t = safe_float(r.get(time_key, 0)) if time_key else 0
         total_transfer_us += t
         avg_key = None
-        for k in ("Avg Time(us)", "Average Time(us)", "AvgTime(us)"):
+        for k in ("Avg Time(us)", "Average Time(us)", "AvgTime(us)", "Avg(us)"):
             if k in r:
                 avg_key = k
                 break

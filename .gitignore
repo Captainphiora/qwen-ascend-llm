@@ -9,6 +9,7 @@ __pycache__/
 # Model files
 download/
 models/
+output
 output/
 *.om
 
@@ -23,7 +24,9 @@ ops_info_new.json
 profiling/output/
 profiling/sampling_data/
 profiling/data/
+profiling/decode_profile/
 profiling_output/
+profiling_output_*/
 profiling_data/
 profiling_sampling_data/
 opt_profiling/
@@ -47,6 +50,7 @@ opt_models/
 # Misc
 results/
 results*/
+skills/
 *.jsonl
 /compare*
 /math*

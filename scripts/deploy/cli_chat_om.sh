@@ -6,7 +6,9 @@ MAX_OUTPUT_LENGTH=4096 #kv_cache_length=1024
 KV_CACHE_LENGTH=4096
 MAX_PREFILL_LENGTH=1
 HF_MODEL_DIR="../models/${MODEL_NAME}"
-OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand_310b.om"
+# OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v4_noexpand_310b.om"
+OM_MODEL_PATH="opt_models/v5_gate_up_fuse_310b/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v5_gate_up_fuse_310b.om"
+# OM_MODEL_PATH="opt_models/v6_transpose_elim_310b/DeepSeek-R1-Distill-Qwen-1.5B_4096_1_v6_transpose_elim_310b.om"
 # OM_MODEL_PATH="output/model/DeepSeek-R1-Distill-Qwen-1.5B_w8a8_4096_1_w8a8_norope.om"
 echo "OM_MODEL_PATH:$OM_MODEL_PATH"
 
@@ -23,8 +25,8 @@ DEVICE_STR="npu"
 DEVICE_ID=0
 # SOC_VERSION=Ascend310B1
 DTYPE="float16"
-# SAMPLING_DEVICE="cpu"
-SAMPLING_DEVICE="npu"
+SAMPLING_DEVICE="cpu"
+# SAMPLING_DEVICE="npu"
 python3 cli_chat.py \
   --session_type=$SESSION_TYPE \
   --cpu_thread=$CPU_THREAD \
