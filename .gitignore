@@ -1,0 +1,36 @@
+# Model artifacts
+opt_models/
+output/
+*.om
+*.onnx
+!scripts/*.cfg
+
+# Profiling
+profiling/
+profiling_data/
+profiling_output/
+PROF_*/
+
+# Build artifacts
+kernel_meta/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Temp files
+amct_log*/
+onnx_log/
+tmp/
+*.log
+
+# IDE
+.idea/
+.vscode/
+.claude/
+.venv/
+
+# Misc
+features.npy
+fusion_result.json
+ge_check_op.json
+ops_info*.json
