@@ -2,7 +2,7 @@
 
 DeepSeek-R1-Distill-Qwen-1.5B 在Atlas 200I A2(310B1) 上的推理部署与性能优化。
 
-采用 **PyTorch → ONNX → OM** 流程，支持 FP16 和 W8A8 量化推理。
+采用 **PyTorch → ONNX → (AMCT 量化) → OM** 流程，支持 FP16 和 W8A8 量化推理。
 
 ## 目标平台
 
