@@ -179,12 +179,12 @@ python scripts/amct_onnx_calibrate.py \
 | lm_head | 1 | 输出层精度敏感 |
 | Attention QK^T | 28 | activation x activation，无固定权重 |
 | Attention Score x V | 28 | activation x activation，无固定权重 |
-| outlier down_proj (L2/L26/L27) | 3 | 激活存在极端离群值，有效动态范围 < 100 |
+| outlier down_proj (L2/L26/L27) | 3 | 激活存在极端离群值，有效动态范围 `< 100` |
 
 跳过判据基于**有效动态范围** (`255 / scale_d`):
-- < 100: 必须跳过（量化噪声远超信号）
-- 100~500: 建议跳过
-- > 500: 可接受
+- `< 100`: 必须跳过（量化噪声远超信号）
+- `100~500`: 建议跳过
+- `> 500`: 可接受
 
 IFMR 算法参数使用 AMCT 默认值（也可以在 cfg 中显式指定）。
 
