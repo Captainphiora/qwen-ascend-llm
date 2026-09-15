@@ -250,7 +250,7 @@ python export/change_node_v11_kv_inplace.py \
 | v9 | modeling | v9_kv_slice | v1_rope | BSHD | KV 读取改用 narrow/Slice 替代索引 | ✅ (性能回退) |
 | **v10** | **modeling** | **v10_gate_up_prefuse** | **v1_rope** | **BSHD** | **gate_up 权重预拼接 (fuse_gate_up_weights)，AMCT 兼容** | **✅** |
 | v11 | modeling + change_node | v11_kv_inplace | v11_kv_inplace (QKV 合并) | BSHD | Where 替代 cat 做 KV 原地更新 + ONNX 级 QKV 合并 | ❌ |
-| v12 | change_node | (v10 的 ONNX) | v11_kv_inplace (--skip_rope) | BSHD | v10 W8A8 + v11 change_node QKV 合并 | 待验证 |
+| v12 | change_node | (v10 的 ONNX) | v11_kv_inplace (--skip_rope) | BSHD | v10 W8A8 + v11 change_node QKV 合并 | ✅ |
 
 > **KV Layout 说明**: 大部分版本使用 BSHD `[batch, seq, heads, dim]`。v6/v7/v7b 使用 BHSD `[batch, heads, seq, dim]`，
 > 导出和编译时须指定 `--kv_cache_layout BHSD`，推理引擎也需对应配置。实测 BHSD kernel time 略优但 memcpy 开销更大，
@@ -275,23 +275,15 @@ python export/change_node_v11_kv_inplace.py \
 | v2 | 7.85 ms | 8.51 ms | 117 tok/s | KV cache 静态分配 |
 | v3 | 6.98 ms | 7.51 ms | 133 tok/s | 去 StridedSlice |
 | v4 | 6.33 ms | 7.38 ms | 136 tok/s | GQA broadcast |
-| **v5** | **6.11 ms** | **6.61 ms** | **151 tok/s** | **gate_up concat 融合 (FP16 最优)** |
+| v5 | 6.11 ms | 6.61 ms | 151 tok/s | gate_up concat 融合 |
 | v6 | 5.97 ms | 10.05 ms | 100 tok/s | BHSD layout (memcpy 开销大) |
 | v8 | 5.42 ms | 6.06 ms | 165 tok/s | QKV 合并 (存疑) |
 | v9 | 8.36 ms | 9.03 ms | 111 tok/s | KV slice (回退) |
-| v10 | 6.10 ms | 6.73 ms | 149 tok/s | gate_up 预拼接 (当前最优)|
+| **v10** | **6.10 ms** | **6.73 ms** | **149 tok/s** | **gate_up 预拼接** |
 | v11 | 5.47 ms | 6.82 ms | 147 tok/s | KV in-place (可能需重写推理引擎，存疑) |
 
-**量化 + QKV 合并 (wall-clock)**
 
-| 版本 | TPOT | 吞吐 |
-|------|------|------|
-| v5 FP16 | 11.40 ms | 88 tok/s |
-| v5+QKV FP16 | 10.71 ms | 93 tok/s |
-| v10 W8A8 | 10.28 ms | 97 tok/s |
-| **v12 W8A8+QKV** | **9.87 ms** | **101 tok/s** |
-
-### MATH500  (pass@k, k=1, 500 题, top_p=0.95, temperature=0.6)
+### MATH500  (pass@k, k=1, top_p=0.95, temperature=0.6, kv_cache_length=32768)
 
 | model | acc |
 |------|--------|
