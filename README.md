@@ -1,6 +1,6 @@
 # Qwen-Ascend-LLM
 
-DeepSeek-R1-Distill-Qwen-1.5B 在昇腾 NPU 上的推理部署与性能优化。
+DeepSeek-R1-Distill-Qwen-1.5B 在Atlas 200I A2(310B1) 上的推理部署与性能优化。
 
 采用 **PyTorch → ONNX → OM** 流程，支持 FP16 和 W8A8 量化推理。
 
@@ -8,32 +8,30 @@ DeepSeek-R1-Distill-Qwen-1.5B 在昇腾 NPU 上的推理部署与性能优化。
 
 | 平台 | 芯片 | soc_version | 说明 |
 |------|------|-------------|------|
-| Atlas 200I A2 | Ascend 310B1 | `Ascend310B1` | 边缘推理 |
-| Atlas 800T A3 | Ascend 910 | `Ascend910_9382` | 数据中心 |
+| Atlas 200I A2 | Ascend 310B | `Ascend310B1` | 边缘推理 |
+| Atlas 800T A3 | Ascend 910C | `Ascend910_9382` | 数据中心 |
 
-310B1 能跑的 910 都能跑，反之不一定。除 ATC 编译时 `--soc_version` 不同外，其余流程通用。
+310B1 能跑的 910 都能跑，反之不一定。除 ATC 编译 `--soc_version` 不同外，其余流程通用。
 
 ## 快速开始
 
 ### 环境准备
 
 ```bash
-# 1. 激活 conda 环境（需预先创建，包含 torch、torch_npu、onnxruntime 等依赖）
+# 1. 创建 conda 环境并安装依赖
+conda create -n qwen_ascend_cann900 python=3.10 -y
 conda activate qwen_ascend_cann900
+pip install -r requirements.txt
 
-# 2. 设置 CANN 路径（根据实际安装路径修改）
-export ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.0.0
-export ASCEND_TOOLKIT_HOME=/usr/local/Ascend/cann-9.0.0
-export LD_LIBRARY_PATH=$ASCEND_HOME_PATH/lib64:$ASCEND_HOME_PATH/lib64/plugin/opskernel:/usr/local/Ascend/driver/lib64:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:$LD_LIBRARY_PATH
-export PATH=$ASCEND_HOME_PATH/bin:$PATH
-export ASCEND_OPP_PATH=$ASCEND_HOME_PATH/opp
+# 2. 设置 CANN 环境（需预装 CANN 9.0.0）
+source /usr/local/Ascend/cann-9.0.0/set_env.sh
 export PYTHONPATH=$(pwd):$PYTHONPATH
 ```
 
 ### 模型下载
 
 ```bash
-# HuggingFace（需网络访问）
+# HuggingFace
 pip install huggingface_hub
 huggingface-cli download deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --local-dir models/DeepSeek-R1-Distill-Qwen-1.5B
 ```
@@ -51,7 +49,7 @@ python export_onnx.py \
   --kv_cache_length 4096 --kv_cache_layout BSHD \
   --device_str npu --dtype float16
 
-# Step 2: ONNX 图优化（RoPE 融合）
+# Step 2: ONNX 图优化（RoPE 融合等）
 python change_node_v5_gate_up_fuse.py \
   --input_model_path output/model.onnx \
   --output_model_path output/model_changed.onnx
@@ -65,11 +63,16 @@ python onnx2om.py \
   --kv_cache_layout BSHD \
   --soc_version Ascend310B1
 
-# Step 4: 推理
+# Step 4: cli
 cd .. && python cli_chat.py \
   --hf_model_dir $HF_MODEL_DIR \
   --om_model_path output/model.om \
   --max_prefill_length 1
+
+# Step 5 (可选): 启动 OpenAI 兼容 API 服务
+python3 server.py --config configs/deepseek_r1_1.5b_910_w8a8.json
+# 测试: curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/json" \
+#   -d '{"model":"DeepSeek-R1-Distill-Qwen-1.5B","messages":[{"role":"user","content":"你好"}]}'
 ```
 
 ---
@@ -119,10 +122,10 @@ python export/onnx2om.py \
 
 ```bash
 # CLI 交互
-python cli_chat.py --hf_model_dir $HF_MODEL_DIR --om_model_path model.om
+python cli_chat.py --hf_model_dir $HF_MODEL_DIR --om_model_path model.om --dtype float16
 
-# OpenAI 兼容 API 服务
-python main.py --hf_model_dir $HF_MODEL_DIR --om_model_path model.om
+# OpenAI 兼容 API 服务（修改 configs/ 下的 JSON 配置后启动）
+python server.py --config configs/deepseek_r1_1.5b_910_w8a8.json
 ```
 
 ---
@@ -183,7 +186,7 @@ python scripts/amct_onnx_calibrate.py \
 - 100~500: 建议跳过
 - > 500: 可接受
 
-IFMR 算法参数使用 AMCT 默认值（不需要在 cfg 中显式指定）。
+IFMR 算法参数使用 AMCT 默认值（也可以在 cfg 中显式指定）。
 
 ### 精度验证
 
@@ -228,44 +231,97 @@ python export/change_node_v11_kv_inplace.py \
 
 ---
 
-## 优化版本演进
+## 历史优化版本
 
 ### 版本列表
 
-| 版本 | modeling 文件 | 核心改动 |
-|------|--------------|---------|
-| v0 | (原始 HF) | baseline |
-| v1 | -- | RoPE change_node 融合 |
-| v2 | v2_kvcache | KV cache 静态分配 |
-| v3 | v3_kvcache_noslice | KV cache 去 slice |
-| v4 | v4_noexpand | GQA 去 expand（broadcast 替代 repeat_kv）|
-| **v5** | **v5_gate_up_fuse** | **gate_proj + up_proj 运行时 concat 融合** |
-| v6 | v6_transpose_elim | BHSD layout（消除 transpose）|
-| v7 | v7_perlayer_kv | KV cache 按层预切分 |
-| v7b | v7b_split_kv | 图内 Split 替代多输入 |
-| v8 | v8_qkv_fuse | QKV 投影合并（change_node 层面）|
-| v9 | v9_kv_slice | KV cache slice 优化 |
-| **v10** | **v10_gate_up_prefuse** | **gate_up 权重预拼接（AMCT 兼容）+ W8A8** |
-| v11 | v11_kv_inplace | KV in-place + QKV 合并 |
-| **v12** | (v10 + v11 QKV) | **v10 W8A8 + QKV 合并（当前最优）** |
+| 版本 | 改动范围 | modeling 文件 | change_node | KV Layout | 核心改动 | 推理验证 |
+|------|---------|--------------|-------------|-----------|---------|---------|
+| v0 | — | (原始 HF) | change_node.py (Trilu 修复) | BSHD | baseline | 无 modeling 文件 |
+| v1 | change_node | (同 v0) | v1_rope (RoPE 融合) | BSHD | NPURotaryPositionEmbedding 替代 6 算子 RoPE | 无 modeling 文件 |
+| v2 | modeling | v2_kvcache | v1_rope | BSHD | KV cache 从动态 list 改为静态预分配张量 | ✅ |
+| v3 | modeling | v3_kvcache_noslice | v1_rope | BSHD | 6D cache layout，索引读取替代 StridedSlice | ✅ |
+| v4 | modeling | v4_noexpand | v1_rope | BSHD | GQA: unsqueeze+broadcast 替代 repeat_kv 的 Expand | ✅ |
+| **v5** | **modeling** | **v5_gate_up_fuse** | **v1_rope** | **BSHD** | **MLP: gate+up 运行时 cat 为一次 MatMul + Split** | **✅ FP16 最优** |
+| v6 | modeling | v6_transpose_elim | v1_rope | **BHSD** | BHSD layout，消除 attention 前的 Transpose | ✅ (memcpy 大，不推荐) |
+| v7 | modeling | v7_perlayer_kv | v1_rope | BHSD | 28 层独立 KV 输入 (31 输入，onnx2om 不支持) | 未编译 |
+| v7b | modeling | v7b_split_kv | v1_rope | **BHSD** | 图内 chunk+Split 替代多输入，恢复单 KV 输入 | 未编译 |
+| v8 | modeling | v8_qkv_fuse | v1_rope | BSHD | QKV 投影合并为 qkv_proj + fuse_qkv_weights() | 未编译 |
+| v9 | modeling | v9_kv_slice | v1_rope | BSHD | KV 读取改用 narrow/Slice 替代索引 | ✅ (性能回退) |
+| **v10** | **modeling** | **v10_gate_up_prefuse** | **v1_rope** | **BSHD** | **gate_up 权重预拼接 (fuse_gate_up_weights)，AMCT 兼容** | **✅** |
+| v11 | modeling + change_node | v11_kv_inplace | v11_kv_inplace (QKV 合并) | BSHD | Where 替代 cat 做 KV 原地更新 + ONNX 级 QKV 合并 | ❌ |
+| v12 | change_node | (v10 的 ONNX) | v11_kv_inplace (--skip_rope) | BSHD | v10 W8A8 + v11 change_node QKV 合并 | 待验证 |
 
-### 性能对比 (910, batch=1, kv_cache=4096, decode)
+> **KV Layout 说明**: 大部分版本使用 BSHD `[batch, seq, heads, dim]`。v6/v7/v7b 使用 BHSD `[batch, heads, seq, dim]`，
+> 导出和编译时须指定 `--kv_cache_layout BHSD`，推理引擎也需对应配置。实测 BHSD kernel time 略优但 memcpy 开销更大，
+> wall-clock 下 BSHD 反而更快。
+>
+> **change_node 说明**: v1_rope 到 v10 的 change_node 文件**完全相同**，均做 RoPE 融合 + Trilu 修复。
+> v4_noexpand_310b 是 310B1 专用版，只做 Trilu 修复（310B1 不支持 RoPE 融合算子，实际上这个融合算子对于性能提升不大）。
+> v11 的 change_node 新增 QKV 合并 pass（合并 q/k/v_proj 为单次 MatMul + Split）。
+>
+> **v5 与 v10 的关系**: v10 是 v5 的升级版，v6~v9 的实验（BHSD、per-layer KV、QKV 合并、narrow/Slice）全部回退。
+> v10 相比 v5 唯一的实质升级是 AMCT 兼容性：v5 的运行时 concat 让 AMCT 把 gate_up 权重判定为动态 tensor，
+> 无法预量化为 INT8；v10 的静态 parameter 让 AMCT 能正确处理，这是做 W8A8 量化的前提。
+> FP16 性能两者基本一致（v5: 151 tok/s, v10: 149 tok/s）。
+> v11 的 change_node 新增 QKV 合并 pass（合并 q/k/v_proj 为单次 MatMul + Split）。
 
-| 版本 | 量化 | QKV合并 | TPOT | 吞吐 |
-|------|------|---------|------|------|
-| v5 FP16 | -- | -- | 11.40 ms | 88 tok/s |
-| v5+QKV FP16 | -- | Yes | 10.71 ms | 93 tok/s |
-| v10 W8A8 | W8A8 | -- | 10.28 ms | 97 tok/s |
-| **v12 W8A8+QKV** | **W8A8** | **Yes** | **9.87 ms** | **101 tok/s** |
+### 性能对比 (910, batch=1, kv_cache=4096, decode, Device 0)
 
-### MATH500 精度 (50 题, top_p=0.95, temperature=0.6)
+**FP16 各版本 Profiling**
 
-| 模型 | 准确率 |
+| 版本 | Kernel Time | TPOT (端到端) | 吞吐 | 核心改动 |
+|------|------------|--------------|------|---------|
+| v2 | 7.85 ms | 8.51 ms | 117 tok/s | KV cache 静态分配 |
+| v3 | 6.98 ms | 7.51 ms | 133 tok/s | 去 StridedSlice |
+| v4 | 6.33 ms | 7.38 ms | 136 tok/s | GQA broadcast |
+| **v5** | **6.11 ms** | **6.61 ms** | **151 tok/s** | **gate_up concat 融合 (FP16 最优)** |
+| v6 | 5.97 ms | 10.05 ms | 100 tok/s | BHSD layout (memcpy 开销大) |
+| v8 | 5.42 ms | 6.06 ms | 165 tok/s | QKV 合并 (存疑) |
+| v9 | 8.36 ms | 9.03 ms | 111 tok/s | KV slice (回退) |
+| v10 | 6.10 ms | 6.73 ms | 149 tok/s | gate_up 预拼接 (当前最优)|
+| v11 | 5.47 ms | 6.82 ms | 147 tok/s | KV in-place (可能需重写推理引擎，存疑) |
+
+**量化 + QKV 合并 (wall-clock)**
+
+| 版本 | TPOT | 吞吐 |
+|------|------|------|
+| v5 FP16 | 11.40 ms | 88 tok/s |
+| v5+QKV FP16 | 10.71 ms | 93 tok/s |
+| v10 W8A8 | 10.28 ms | 97 tok/s |
+| **v12 W8A8+QKV** | **9.87 ms** | **101 tok/s** |
+
+### MATH500  (pass@k, k=1, 500 题, top_p=0.95, temperature=0.6)
+
+| model | acc |
 |------|--------|
-| v5 FP16 | 72.0% (36/50) |
-| v12 W8A8+QKV | 62.0% (31/50) |
+| v5 FP16 | 75.8% (379/500) |
+| v10 W8A8 | 70.8% (354/500) |
 
-详细结果见 `docs/` 目录下的分析文档。
+**FP16 by subject**
+
+| subject | acc |
+|------|--------|
+| Algebra | 90.3% (112/124) |
+| Number Theory | 87.1% (54/62) |
+| Prealgebra | 79.3% (65/82) |
+| Intermediate Algebra | 70.1% (68/97) |
+| Counting & Probability | 65.8% (25/38) |
+| Precalculus | 60.7% (34/56) |
+| Geometry | 51.2% (21/41) |
+
+**W8A8 by subject**
+
+| subject | acc |
+|------|--------|
+| Algebra | 87.9% (109/124) |
+| Number Theory | 82.3% (51/62) |
+| Prealgebra | 73.2% (60/82) |
+| Counting & Probability | 68.4% (26/38) |
+| Intermediate Algebra | 62.9% (61/97) |
+| Precalculus | 51.8% (29/56) |
+| Geometry | 43.9% (18/41) |
+
 
 ---
 
@@ -303,15 +359,8 @@ python export/change_node_v11_kv_inplace.py \
 
 ## 已知问题与注意事项
 
-### CANN 版本
 
-多个 CANN 版本并存时，**不要** `source set_env.sh`（可能指向错误版本）。手动设置 `ASCEND_HOME_PATH` 等环境变量。
-
-### ONNX 导出
-
-必须使用 `--device_str npu --dtype float16`。CPU 导出的 FP32 ONNX 在 ATC 编译时会插入大量 Cast 算子，严重拖慢推理。
-
-### 量化模型 ATC 编译
+### 量化场景 ATC 编译
 
 必须使用 `--precision_mode origin`，不能用 `mixed_float16`。
 
@@ -330,4 +379,4 @@ v5 的 ONNX 中 gate_proj 和 up_proj 通过 Concat 节点拼接。AMCT 将 Conc
 
 ## 致谢
 
-本项目参考了 [ascend-llm](https://gitee.com/yinghuo302/ascend-llm) 项目。
+本项目基于 [Tlntin/qwen-ascend-llm](https://github.com/Tlntin/qwen-ascend-llm) 开发，在此基础上进行了模型适配、量化优化。

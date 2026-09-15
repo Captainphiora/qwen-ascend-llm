@@ -78,6 +78,9 @@ def _get_unpad_data(attention_mask):
 
 
 # Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Qwen2
+_KV_INPLACE = True
+
+
 class Qwen2RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -183,11 +186,8 @@ class Qwen2MLP(nn.Module):
         self.gate_up_weight = None
 
     def fuse_gate_up(self):
-        """Pre-fuse gate_proj + up_proj weights into a single parameter.
-        Call after loading weights, before ONNX export.
-        This ensures the fused weight is a single ONNX initializer,
-        so AMCT can pre-quantize it as INT8 constant (no runtime AscendQuant).
-        """
+        if hasattr(self.gate_proj, 'weight_int8'):
+            return
         self.gate_up_weight = nn.Parameter(
             torch.cat([self.gate_proj.weight.data, self.up_proj.weight.data], dim=0),
             requires_grad=False,
@@ -282,25 +282,26 @@ class Qwen2Attention(nn.Module):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        kv_seq_len = key_states.shape[-2] + past_key_value.shape[4]
-        #         raise ValueError(
-        #             f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
-        #             "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
-        #             "with a layer index."
-        #         )
-        #     # kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-        #     kv_seq_len += past_key_value.shape[2]
-        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+        kv_seq_len = past_key_value.shape[4]
+        if _KV_INPLACE:
+            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len + 1)
+        else:
+            kv_seq_len = key_states.shape[-2] + kv_seq_len
+            cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
         output_cache = (key_states, value_states)
         if past_key_value is not None:
-            # past_key_value shape: [1, num_layers, 2*num_kv_heads, kv_len, head_dim]
-            # index layer directly, then split K and V
-            # past_key_value shape: [1, num_layers, 2, num_kv_heads, kv_len, head_dim]
-            cache_key = past_key_value[:, self.layer_idx, 0]    # [1, num_kv_heads, kv_len, head_dim]
-            cache_value = past_key_value[:, self.layer_idx, 1]  # [1, num_kv_heads, kv_len, head_dim]
-            key_states = torch.cat((cache_key, key_states), dim=2)
-            value_states = torch.cat((cache_value, value_states), dim=2)
+            cache_key = past_key_value[:, self.layer_idx, 0]
+            cache_value = past_key_value[:, self.layer_idx, 1]
+            if _KV_INPLACE:
+                kv_len = cache_key.shape[2]
+                pos_mask = (torch.arange(kv_len, device=cache_key.device) == position_ids[0, 0])
+                pos_mask = pos_mask.view(1, 1, kv_len, 1)
+                key_states = torch.where(pos_mask, key_states, cache_key)
+                value_states = torch.where(pos_mask, value_states, cache_value)
+            else:
+                key_states = torch.cat((cache_key, key_states), dim=2)
+                value_states = torch.cat((cache_value, value_states), dim=2)
 
         # GQA broadcast: avoid repeat_kv expand
         # query_states: [bsz, num_heads, q_len, head_dim] → [bsz, num_kv_heads, num_groups, q_len, head_dim]
@@ -974,33 +975,22 @@ class Qwen2Model(Qwen2PreTrainedModel):
     @staticmethod
     def get_masks(input_ids, past_length, padding_mask=None):
         batch_size, seq_length = input_ids.shape
-        full_attention_mask = torch.ones(
-            batch_size,
-            seq_length,
-            seq_length,
-            device=input_ids.device,
-            # dtype=torch.int64
-        )
-        full_attention_mask.tril_()
-        # if past_length is not None:
-        full_attention_mask = torch.cat(
-            (
-                torch.ones(
-                    batch_size,
-                    seq_length,
-                    past_length,
-                    device=input_ids.device,
-                    # dtype=torch.int64
-                ),
-                full_attention_mask
-            ),
-            dim=-1
-        )
-        if padding_mask is not None:
-            full_attention_mask = full_attention_mask * padding_mask.unsqueeze(
-                1)
-        # if not past_length and padding_mask is not None:
-        #     full_attention_mask -= padding_mask.unsqueeze(-1) - 1
+        if padding_mask is not None and padding_mask.shape[-1] == past_length:
+            full_attention_mask = torch.ones(
+                batch_size, seq_length, past_length, device=input_ids.device,
+            )
+            full_attention_mask = full_attention_mask * padding_mask.unsqueeze(1)
+        else:
+            full_attention_mask = torch.ones(
+                batch_size, seq_length, seq_length, device=input_ids.device,
+            )
+            full_attention_mask.tril_()
+            full_attention_mask = torch.cat(
+                (torch.ones(batch_size, seq_length, past_length, device=input_ids.device),
+                 full_attention_mask), dim=-1,
+            )
+            if padding_mask is not None:
+                full_attention_mask = full_attention_mask * padding_mask.unsqueeze(1)
         full_attention_mask = (full_attention_mask < 0.5).bool()
         full_attention_mask.unsqueeze_(1)
         return full_attention_mask
@@ -1106,7 +1096,8 @@ class Qwen2Model(Qwen2PreTrainedModel):
         num_layers = len(self.layers)
         num_kv_heads = self.config.num_key_value_heads
         head_dim = self.config.hidden_size // self.config.num_attention_heads
-        past_key_values = past_key_values.permute(0, 2, 1, 3)  # [1, num_layers*2*kv_heads, kv_len, head_dim]
+        # v6: input is BHSD [1, 112, kv_len, 128] — no permute needed
+        # direct view to 6D (zero-copy, contiguous)
         past_key_values = past_key_values.view(
             1, num_layers, 2, num_kv_heads, -1, head_dim
         )  # [1, num_layers, 2, num_kv_heads, kv_len, head_dim]
@@ -1181,13 +1172,10 @@ class Qwen2Model(Qwen2PreTrainedModel):
         one_shape = list(presents[0].shape)
         one_shape[2] = one_shape[2] * len(presents)
         presents = torch.concat(presents, dim=1)
-        # transpose for presents
-        presents = presents.transpose(1, 2)
+        # v6: output stays BHSD [1, 112, seq, 128] — no transpose
         return (
             hidden_states,
             presents,
-            # all_hidden_states,
-            # all_self_attns
         )
 
         # if not return_dict:
@@ -1231,10 +1219,6 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel):
         return self.model
 
     def fuse_gate_up_weights(self):
-        """Pre-fuse gate_proj + up_proj into single parameter per MLP layer.
-        Eliminates Concat node in ONNX graph so AMCT treats the fused weight
-        as a static initializer and pre-quantizes it (no runtime AscendQuant).
-        """
         count = 0
         for module in self.modules():
             if isinstance(module, Qwen2MLP) and hasattr(module, 'fuse_gate_up'):

@@ -1,0 +1,40 @@
+#!/bin/bash
+# Step 3: ATC 编译（ONNX → OM）— FP16, Ascend910
+# 用法: bash scripts/onnx2om_910.sh
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$SCRIPT_DIR"
+
+# ---- 配置 ----
+MODEL_NAME="DeepSeek-R1-Distill-Qwen-1.5B"
+HF_MODEL_DIR="../models/${MODEL_NAME}"
+KV_CACHE_LENGTH=4096
+KV_CACHE_LAYOUT="BSHD"
+MAX_PREFILL_LENGTH=1
+SOC_VERSION="Ascend910_9382"
+
+ONNX_MODEL_PATH="opt_models/v5_fp16/onnx_changed/${MODEL_NAME}.onnx"
+OM_MODEL_PATH="opt_models/v5_fp16/om_910/${MODEL_NAME}_${KV_CACHE_LENGTH}_${MAX_PREFILL_LENGTH}"
+# ---- 配置结束 ----
+
+mkdir -p "opt_models/v5_fp16/om_910"
+
+echo "============================================================"
+echo " [Step 3] ATC 编译 — FP16 (Ascend910)"
+echo " Input:   ${ONNX_MODEL_PATH}"
+echo " Output:  ${OM_MODEL_PATH}.om"
+echo " SOC:     ${SOC_VERSION}"
+echo "============================================================"
+
+python3 export/onnx2om.py \
+  --hf_model_dir="$HF_MODEL_DIR" \
+  --onnx_model_path="$ONNX_MODEL_PATH" \
+  --om_model_path="$OM_MODEL_PATH" \
+  --kv_cache_length="$KV_CACHE_LENGTH" \
+  --kv_cache_layout="$KV_CACHE_LAYOUT" \
+  --max_prefill_length="$MAX_PREFILL_LENGTH" \
+  --soc_version="$SOC_VERSION" \
+  --cpu_thread=64
+
+echo "ATC 编译完成: ${OM_MODEL_PATH}.om"

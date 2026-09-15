@@ -149,6 +149,17 @@ def parser_args():
         type=int,
         default=0,
     )
+    parser.add_argument(
+        "--kv_inplace",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--kv_cache_layout",
+        type=str,
+        default="BSHD",
+        choices=["BSHD", "BHSD"],
+    )
     return parser.parse_args()
 
 
@@ -214,6 +225,8 @@ def main_cli():
         device_str=args.device_str,
         device_id=args.device_id,
         sampling_device=args.sampling_device,
+        kv_inplace=args.kv_inplace,
+        kv_cache_layout=args.kv_cache_layout,
     )
     print("==================== 实际生效的推理配置(config) ====================")
     print("session_type      : {}".format(config.session_type))

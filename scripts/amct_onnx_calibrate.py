@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--kv_cache_layout", type=str, default="BSHD",
                         choices=["BSHD", "BHSD"],
                         help="KV cache layout (must match ONNX export)")
+    parser.add_argument("--kv_inplace", action="store_true", default=False,
+                        help="v11 kv_inplace mode: full KV cache pre-allocated, mask=[1, kv_len]")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -161,14 +163,23 @@ def main():
         tokens = tokens[:seq_len]
 
         input_ids = np.array([tokens], dtype=np.int64)
-        attention_mask = np.ones((1, 1 + seq_len), dtype=np.int64)
-        attention_mask[:, 0] = 0
         position_ids = np.arange(seq_len, dtype=np.int64).reshape(1, -1)
-        if args.kv_cache_layout == "BHSD":
+
+        if args.kv_inplace:
+            attention_mask = np.zeros((1, args.kv_cache_length), dtype=np.int64)
+            attention_mask[:, :seq_len] = 1
+            past_key_values = np.zeros(
+                (1, args.kv_cache_length, kv_dim, per_head_dim), dtype=np.float16
+            )
+        elif args.kv_cache_layout == "BHSD":
+            attention_mask = np.ones((1, 1 + seq_len), dtype=np.int64)
+            attention_mask[:, 0] = 0
             past_key_values = np.zeros(
                 (1, kv_dim, args.kv_cache_length, per_head_dim), dtype=np.float16
             )
         else:
+            attention_mask = np.ones((1, 1 + seq_len), dtype=np.int64)
+            attention_mask[:, 0] = 0
             past_key_values = np.zeros(
                 (1, 1, kv_dim, per_head_dim), dtype=np.float16
             )

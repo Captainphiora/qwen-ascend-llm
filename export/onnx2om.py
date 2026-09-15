@@ -301,6 +301,7 @@ try:
     )
     for line in process.stdout:
         sys.stdout.write(line)
+        sys.stdout.flush()
     process.wait()
     if process.returncode != 0:
         raise subprocess.CalledProcessError(process.returncode, " ".join(command_lines))
