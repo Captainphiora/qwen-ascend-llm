@@ -4,12 +4,12 @@ DeepSeek-R1-Distill-Qwen-1.5B 在Atlas 200I A2(310B1) 上的推理部署与性�
 
 采用 **PyTorch → ONNX → (AMCT 量化) → OM** 流程，支持 FP16 和 W8A8 量化推理。
 
-## 目标平台
+## 平台
 
 | 平台 | 芯片 | soc_version | 说明 |
 |------|------|-------------|------|
-| Atlas 200I A2 | Ascend 310B | `Ascend310B1` | 边缘推理 |
-| Atlas 800T A3 | Ascend 910C | `Ascend910_9382` | 数据中心 |
+| Atlas 200I A2 | Ascend 310B | `Ascend310B1` | 端侧 |
+| Atlas 800T A3 | Ascend 910C | `Ascend910_9382` | 训推服务器 |
 
 310B1 能跑的 910 都能跑，反之不一定。除 ATC 编译 `--soc_version` 不同外，其余流程通用。
 
